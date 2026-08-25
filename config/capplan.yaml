@@ -55,7 +55,7 @@ model:
     include_quarter_end: true
 
 calibration:
-  method: "cqr"                # split-conformal quantile regression
+  method: "per_quantile"      # per_quantile (corrects location + width) | cqr (symmetric)
   holdout_days: 60
   per_app: true                # fall back to pooled when an app is too thin
   min_scores_per_app: 200
