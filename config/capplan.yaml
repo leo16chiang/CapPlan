@@ -1,0 +1,88 @@
+# CapPlan configuration.
+#
+# Every number here is an assumption that has to survive an interview with an
+# app custodian. Change it here, not in code.
+
+calendar:
+  # CONFIRM IN WEEK 1. Everything downstream assumes 15-minute SMF intervals.
+  # If the RMF/SMF extract turns out to be 30-min or hourly, only this block
+  # and the intervals_per_day derived value change -- but the row count that
+  # justifies a neural Stage 1 changes with it.
+  interval_minutes: 15
+  prime_start: "08:00"
+  prime_end: "17:00"          # exclusive -> 36 x 15-min intervals
+  fiscal_year_start_month: 11 # fiscal year runs Nov -> Oct
+  # FY label convention: FY2026 = 2025-11-01 .. 2026-10-31 (labelled by end year).
+  fiscal_year_label: "end"
+  holiday_calendar: "config/holidays.txt"
+  timezone: "America/New_York"
+
+scope:
+  environments: ["PROD"]        # non-prod excluded
+  lpar_include: []              # empty = all production LPARs
+  top_n_apps: 35                # top 30-40 apps by prime-time mean MIPS
+  # These land in prime time occasionally. They are never forecast targets,
+  # but they are labelled so the residual bootstrap does not learn them as
+  # ordinary variation.
+  anomaly_event_types: ["DR", "IST", "GCC_SDF"]
+
+normalisation:
+  # Capture ratio is applied as given by the systems programmers -- CapPlan
+  # does not estimate it. Per-LPAR override wins over the default.
+  capture_ratio_default: 1.0
+  capture_ratio_by_lpar: {}
+  # MSU -> MIPS conversion. Also supplied, not estimated.
+  mips_per_msu_default: 6.0
+  mips_per_msu_by_cpu_model: {}
+
+model:
+  horizon_fiscal_years: 2
+  # Quantile grid Stage 1 emits. The simulation needs the tails, the pack
+  # needs the middle.
+  quantiles: [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99]
+  backend: "quantile_ridge"    # quantile_ridge | neuralforecast
+  neuralforecast:
+    architecture: "nhits"      # nhits | tft
+    input_size_days: 20
+    max_steps: 500
+    accelerator: "cpu"
+  features:
+    lags_days: [1, 2, 3, 5, 10, 20]
+    rolling_windows_days: [5, 20, 60]
+    fourier_terms_intraday: 3
+    fourier_terms_annual: 2
+    include_month_end: true
+    include_quarter_end: true
+
+calibration:
+  method: "cqr"                # split-conformal quantile regression
+  holdout_days: 60
+  per_app: true                # fall back to pooled when an app is too thin
+  min_scores_per_app: 200
+
+simulation:
+  n_paths: 10000
+  path_chunk: 500              # memory ceiling knob; see sim/simulate.py
+  dependence: "block_bootstrap" # block_bootstrap | gaussian_copula
+  block_bootstrap:
+    block_days: 1              # aligned day-blocks: all apps, all 36 intervals
+    residual_scale: "spread"   # raw | spread (scale by forecast interquantile)
+    exclude_anomaly_days: true
+  gaussian_copula:
+    shrinkage: 0.1             # Ledoit-Wolf style shrink to diagonal
+  seed: 20260101
+  reducer: "annual_max"        # see sim/reducers.py registry
+
+evaluation:
+  rolling_origin:
+    n_folds: 4
+    fold_step_days: 60
+    min_train_days: 250
+  coverage_levels: [0.5, 0.8, 0.9, 0.95]
+
+registry:
+  root: "artefacts"
+
+serve:
+  forecast_store: "data_lake/serving/forecasts.parquet"
+  pack_dir: "artefacts/packs"
