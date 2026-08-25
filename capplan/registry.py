@@ -82,7 +82,12 @@ class Run:
         self.manifest.setdefault("inputs", {}).update(inputs)
 
     def add_artefact(self, path: Path, role: str) -> None:
-        rel = path.relative_to(self.dir) if path.is_absolute() else path
+        # Manifest paths are always relative to the run directory. Testing
+        # `path.is_absolute()` is not enough: when the registry root is itself
+        # relative (`artefacts/`, the default), `run.path(...)` returns a
+        # relative path that already contains the run directory, and storing it
+        # verbatim makes `verify` look for artefacts/<kind>/<id>/artefacts/...
+        rel = _relative_to_run(path, self.dir)
         entry = {
             "role": role,
             "path": str(rel),
@@ -173,6 +178,18 @@ class Registry:
             elif sha256_file(path) != entry["sha256"]:
                 problems.append(f"hash mismatch: {entry['path']}")
         return problems
+
+
+def _relative_to_run(path: Path, run_dir: Path) -> Path:
+    """Path relative to the run directory, whether or not either is absolute."""
+    resolved_path = path if path.is_absolute() else Path.cwd() / path
+    resolved_dir = run_dir if run_dir.is_absolute() else Path.cwd() / run_dir
+    try:
+        return resolved_path.resolve().relative_to(resolved_dir.resolve())
+    except ValueError as exc:
+        raise ValueError(
+            f"artefact {path} is not inside run directory {run_dir}"
+        ) from exc
 
 
 def _point_latest(base: Path, run_id: str) -> None:

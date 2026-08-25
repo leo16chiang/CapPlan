@@ -141,4 +141,4 @@ argument for the neural backend changes with it.
 
 - `docs/week1_checklist.md` -- what to confirm before writing more code
 - `docs/architecture.md` -- why each stage is shaped the way it is
-- `docs/defects_found.md` -- bugs this codebase caught by measuring its own output
+- `docs/defects_found.md` -- bugs this codebase caught by measuring its own output (ten of them)

@@ -123,7 +123,26 @@ bootstrap is expected to err.
 **Test.** covered by `tests/test_coincidence.py::test_unattributed_load_is_flagged_not_hidden`
 and the backtest's own reporting.
 
-## 8. IRLS converging on the median and not on the tails
+## 8. Registry artefact paths not relativised under a relative root
+
+**Symptom.** After a clean end-to-end run in which every stage succeeded and
+every file was written, `registry.verify()` reported every artefact in every run
+as missing.
+
+**Cause.** `add_artefact` only relativised the stored path when it was absolute.
+With the default registry root (`artefacts/`, relative), `run.path(...)` returns
+a relative path that *already contains* the run directory, so it was stored
+verbatim and `verify` then looked under
+`artefacts/<kind>/<id>/artefacts/<kind>/<id>/...`.
+
+**Why the existing test missed it.** It used pytest's `tmp_path`, which is
+absolute, so it took the branch that worked. The regression test now runs with
+the working directory changed and a relative root, and asserts on the stored
+path itself rather than only on the verify result.
+
+**Test.** `tests/test_pipeline_parts.py::test_registry_verifies_with_a_relative_root`
+
+## 9. IRLS converging on the median and not on the tails
 
 **Symptom.** Nominal 0.10 quantile covering 0.164; nominal 0.90 covering 0.776.
 
@@ -137,7 +156,7 @@ fifty.
 
 **Test.** `tests/test_stage1.py::test_quantile_ridge_achieves_nominal_coverage`
 
-## 9. Symmetric CQR cannot correct a location bias
+## 10. Symmetric CQR cannot correct a location bias
 
 **Symptom.** After conformal calibration, holdout coverage error improved from
 0.255 to 0.127 -- better, but nowhere near calibrated. The median quantile was

@@ -246,6 +246,34 @@ def test_registry_round_trips_and_verifies(tmp_path, cfg):
     assert "hash mismatch: thing.json" in registry.verify("train")
 
 
+def test_registry_verifies_with_a_relative_root(tmp_path, monkeypatch, cfg):
+    """REGRESSION: with the default relative root (`artefacts/`), artefact paths
+    were stored un-relativised, so `verify` looked under
+    artefacts/<kind>/<id>/artefacts/<kind>/<id>/... and reported every artefact
+    missing. The original test used tmp_path, which is absolute, and missed it.
+    """
+    monkeypatch.chdir(tmp_path)
+    registry = Registry("artefacts")
+    run = registry.new_run("simulate", config=cfg)
+    np.savez_compressed(run.path("simulation.npz"), a=np.arange(3))
+    run.add_artefact(run.dir / "simulation.npz", role="simulation")
+    run.write_json("summary.json", {"ok": True})
+    run.finalise()
+
+    entry = registry.resolve("simulate").manifest["artefacts"][0]
+    assert entry["path"] == "simulation.npz", "manifest paths must be run-relative"
+    assert registry.verify("simulate") == []
+
+
+def test_artefacts_outside_the_run_directory_are_rejected(tmp_path, cfg):
+    registry = Registry(tmp_path / "artefacts")
+    run = registry.new_run("train", config=cfg)
+    stray = tmp_path / "elsewhere.json"
+    stray.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="not inside run directory"):
+        run.add_artefact(stray, role="stray")
+
+
 def test_resolving_a_missing_run_is_a_clear_error(tmp_path):
     with pytest.raises(FileNotFoundError):
         Registry(tmp_path).resolve("train")
