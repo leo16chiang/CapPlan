@@ -50,14 +50,24 @@ class ForecastCube:
         """(apps, days, intervals) central forecast. Not a peak forecast."""
         return self.q[..., self.median_index]
 
+    # Minimum interquantile width, as a fraction of the predicted median.
+    # Stage 2 divides residuals by this, so an absolute floor is the wrong
+    # shape: 1e-6 MIPS is "no floor at all" for a 2,000-MIPS app and the
+    # resulting standardised residuals reach the hundreds. A relative floor
+    # scales with the app, which is the only way one constant can serve both a
+    # 20-MIPS app and a 2,000-MIPS one.
+    MIN_SPREAD_FRACTION = 0.02
+    MIN_SPREAD_ABS = 0.1
+
     def spread(self, lo: float = 0.1, hi: float = 0.9) -> np.ndarray:
         """Interquantile width, used to scale bootstrap residuals."""
         i_lo = int(np.argmin(np.abs(self.quantiles - lo)))
         i_hi = int(np.argmin(np.abs(self.quantiles - hi)))
         width = self.q[..., i_hi] - self.q[..., i_lo]
-        # A degenerate interval would make scaled residuals blow up or vanish;
-        # floor it at something below measurement resolution.
-        return np.maximum(width, 1e-6)
+        floor = np.maximum(
+            self.MIN_SPREAD_FRACTION * np.abs(self.median), self.MIN_SPREAD_ABS
+        )
+        return np.maximum(width, floor)
 
     def app_pos(self, app: str) -> int:
         return self.apps.index(app)

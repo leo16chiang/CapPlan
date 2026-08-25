@@ -400,10 +400,21 @@ def fitted_quantiles(art: Stage1Artifacts) -> np.ndarray:
     Stage 2 needs these: residuals are defined against the fitted median, and
     the bootstrap blocks are built from them.
     Shape (apps, days, intervals, quantiles), in MIPS.
+
+    Rows the design marked invalid -- the lag/rolling burn-in at the start of
+    history -- come back as NaN rather than as a prediction from zero-filled
+    features. Zero-filling them produces plausible-looking numbers with
+    near-degenerate spreads, and since Stage 2 divides by that spread, a
+    handful of burn-in cells is enough to put standardised residuals in the
+    hundreds and blow the simulated peak up by an order of magnitude. Ask for a
+    prediction on features that do not exist and you get NaN.
     """
     n_apps, n_days, n_int = art.cube.shape
+    n_q = len(art.quantiles)
     X = np.nan_to_num(art.design.X, nan=0.0)
-    pred = art.model.predict(X).reshape(n_apps, n_days, n_int, len(art.quantiles))
+    pred = art.model.predict(X)
+    pred[~art.design.valid] = np.nan
+    pred = pred.reshape(n_apps, n_days, n_int, n_q)
     return pred * art.scales[:, None, None, None]
 
 
