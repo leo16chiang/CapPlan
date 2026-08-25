@@ -1,0 +1,353 @@
+"""End-to-end pipeline stages, wired to the registry.
+
+Each function is one CLI verb, takes config, and writes a versioned run
+directory with a manifest. They chain by run id rather than by passing objects
+around, so any stage can be re-run against an earlier stage's output without
+re-running everything before it -- which matters when Stage 1 takes a minute and
+the simulation takes two.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from capplan import paths
+from capplan.config import Config
+from capplan.data.calendar import grid_from_config
+from capplan.data.event_labels import anomaly_report
+from capplan.data.ingest import bootstrap_synthetic_lake, read_intervals, read_table
+from capplan.data.mips_normalisation import audit_summary
+from capplan.diagnostics import run_all
+from capplan.diagnostics.runner import verdict as diagnostics_verdict
+from capplan.logging_utils import get_logger
+from capplan.model.calibrate import apply_conformal, calibrate_stage1
+from capplan.model.features import anomaly_mask
+from capplan.model.forecast import ForecastCube
+from capplan.model.train import fit_stage1, fitted_quantiles, forecast_horizon
+from capplan.registry import Registry, Run
+from capplan.serve.forecast_store import publish
+from capplan.serve.pack_gen import generate_pack
+from capplan.sim.residuals import compute_residuals, dependence_report
+from capplan.sim.simulate import build_sampler, simulate
+
+LOG = get_logger(__name__)
+
+
+def _registry(cfg: Config) -> Registry:
+    return Registry(cfg.get("registry.root", "artefacts"))
+
+
+# --------------------------------------------------------------------------
+
+
+def stage_ingest(cfg: Config, synthetic: bool = False, seed: int = 7) -> Run:
+    """Land data into the lake. `synthetic=True` generates it first."""
+    grid = grid_from_config(cfg)
+    run = _registry(cfg).new_run("ingest", config=cfg, tags=["synthetic"] if synthetic else [])
+    if synthetic:
+        written, report = bootstrap_synthetic_lake(cfg, grid, seed=seed)
+        run.record_inputs({"source": "synthetic", "seed": seed})
+        run.record_metrics(report.to_dict())
+        run.write_json("ingest_report.json", report.to_dict())
+    else:
+        intervals = read_intervals()
+        run.record_inputs({"source": "existing lake", "rows": len(intervals)})
+        run.record_metrics({"rows": len(intervals), "apps": intervals["app_id"].nunique()})
+    run.finalise()
+    return run
+
+
+def stage_diagnostics(cfg: Config) -> Run:
+    """The two pure-SQL checks. Run these before deciding to model anything."""
+    run = _registry(cfg).new_run("diagnostics", config=cfg)
+    result = run_all(exclude_anomalies=True)
+    for path in result.write(run.dir / "frames"):
+        run.add_artefact(path, role=path.stem)
+    run.record_metrics(result.headline)
+    call = diagnostics_verdict(result.headline)
+    run.record("verdict", call)
+    run.write_json("verdict.json", {"verdict": call, "headline": result.headline})
+    run.finalise()
+    LOG.info("%s", call)
+    return run
+
+
+def stage_train(cfg: Config, calibrate: bool = True) -> Run:
+    """Fit Stage 1 and, by default, learn the conformal adjustment."""
+    grid = grid_from_config(cfg)
+    intervals = read_intervals()
+    run = _registry(cfg).new_run("train", config=cfg)
+
+    art = fit_stage1(intervals, grid, cfg)
+    run.record_metrics(art.metrics)
+    run.record(
+        "growth_annual_pct",
+        {
+            app: round(100 * (float(np.exp(g)) - 1), 2)
+            for app, g in zip(art.index.apps, art.growth)
+        },
+    )
+    np.savez_compressed(
+        run.path("stage1.npz"),
+        scales=art.scales,
+        growth=art.growth,
+        feed_correction=art.feed_correction,
+        apps=np.array(art.index.apps, dtype=object),
+        days=np.array([d.isoformat() for d in art.index.days], dtype=object),
+        coef=getattr(art.model, "coef_", np.zeros(0)),
+        mean=getattr(art.model, "mean_", np.zeros(0)),
+        std=getattr(art.model, "std_", np.zeros(0)),
+        origin=str(art.spec.origin),
+        train_years_max=art.spec.train_years_max,
+    )
+    run.add_artefact(run.dir / "stage1.npz", role="stage1_model")
+
+    if calibrate:
+        adjustment, metrics = calibrate_stage1(art, intervals, cfg)
+        np.savez_compressed(
+            run.path("conformal.npz"),
+            per_app=adjustment.per_app,
+            pooled=adjustment.pooled,
+            quantiles=adjustment.quantiles,
+            apps=np.array(adjustment.apps, dtype=object),
+            method=adjustment.method,
+        )
+        run.add_artefact(run.dir / "conformal.npz", role="conformal")
+        run.record_metrics({f"calibration.{k}": v for k, v in metrics.items()})
+
+    run.finalise()
+    return run
+
+
+def stage_simulate(
+    cfg: Config,
+    n_paths: int | None = None,
+    reducers: tuple[str, ...] = ("annual_max", "mean_of_monthly_peaks", "p95_of_daily_peaks"),
+    apply_calibration: bool = True,
+) -> Run:
+    """Stages 1 through 3 end to end, producing the fiscal-year distributions."""
+    grid = grid_from_config(cfg)
+    intervals = read_intervals()
+    n_paths = n_paths or int(cfg.get("simulation.n_paths"))
+    run = _registry(cfg).new_run("simulate", config=cfg)
+
+    art = fit_stage1(intervals, grid, cfg)
+    panel = compute_residuals(
+        observed=art.cube,
+        predicted_q=fitted_quantiles(art),
+        quantiles=art.quantiles,
+        days=art.index.days,
+        apps=art.index.apps,
+        anomaly=anomaly_mask(intervals, art.index),
+        scaling=cfg.get("simulation.block_bootstrap.residual_scale", "spread"),
+    )
+    run.record_metrics(dependence_report(panel))
+    growth_by_app = {
+        app: float(g) for app, g in zip(art.index.apps, art.growth)
+    }
+    run.write_json(
+        "growth.json",
+        {app: round(100 * (float(np.exp(g)) - 1), 3) for app, g in growth_by_app.items()},
+        role="growth_annual_pct",
+    )
+    np.savez_compressed(
+        run.path("growth.npz"),
+        apps=np.array(art.index.apps, dtype=object),
+        growth=art.growth,
+    )
+    run.add_artefact(run.dir / "growth.npz", role="growth")
+
+    anchor = max(art.index.days)
+    future = grid.horizon_business_days(anchor, int(cfg.get("model.horizon_fiscal_years")))
+    forecast = forecast_horizon(art, future)
+
+    if apply_calibration:
+        adjustment, metrics = calibrate_stage1(art, intervals, cfg)
+        forecast = apply_conformal(forecast, adjustment)
+        run.record_metrics({f"calibration.{k}": v for k, v in metrics.items()})
+
+    sampler = build_sampler(cfg, panel)
+    result = simulate(
+        forecast,
+        sampler,
+        grid,
+        n_paths=n_paths,
+        path_chunk=min(int(cfg.get("simulation.path_chunk")), n_paths),
+        reducers=reducers,
+        seed=int(cfg.get("simulation.seed")),
+        dependence=cfg.get("simulation.dependence"),
+    )
+    run.record_metrics(result.diagnostics)
+    result.save(run.path("simulation.npz"))
+    run.add_artefact(run.dir / "simulation.npz", role="simulation")
+
+    tables = pd.concat([result.fy_table(name) for name in reducers], ignore_index=True)
+    tables.to_parquet(run.path("fy_summary.parquet"), index=False)
+    run.add_artefact(run.dir / "fy_summary.parquet", role="fy_summary")
+    run.record("fy_summary", tables.to_dict(orient="records"))
+
+    published = publish(result, run_id=run.run_id)
+    run.record("published", {k: str(v) for k, v in published.items()})
+    run.finalise()
+
+    LOG.info("\n%s", tables.to_string(index=False))
+    return run
+
+
+def stage_backtest(cfg: Config, n_paths: int = 1000, reducer: str = "annual_max") -> Run:
+    """Backtest the simulation against realised LPAR peaks."""
+    from capplan.eval.sim_backtest import backtest_simulation
+
+    grid = grid_from_config(cfg)
+    intervals = read_intervals()
+    lpar_totals = read_table("lpar_totals")
+    run = _registry(cfg).new_run("backtest", config=cfg)
+
+    result = backtest_simulation(
+        intervals, lpar_totals, grid, cfg, n_paths=n_paths, reducer=reducer
+    )
+    run.record_metrics(result.summary())
+    call = result.verdict()
+    run.record("verdict", call)
+    if result.folds:
+        result.frame().to_parquet(run.path("folds.parquet"), index=False)
+        run.add_artefact(run.dir / "folds.parquet", role="folds")
+    run.write_json("verdict.json", {"verdict": call, "summary": result.summary()})
+    run.finalise()
+    LOG.info("\n%s", call)
+    return run
+
+
+def stage_evaluate(cfg: Config, horizon_days: int = 60, n_folds: int | None = None) -> Run:
+    """Rolling-origin scoring of Stage 1 against the baselines."""
+    from capplan.eval.rolling_origin import rolling_origin
+
+    grid = grid_from_config(cfg)
+    intervals = read_intervals()
+    run = _registry(cfg).new_run("evaluate", config=cfg)
+
+    result = rolling_origin(intervals, grid, cfg, n_folds=n_folds, horizon_days=horizon_days)
+    if not result.scores.empty:
+        result.scores.to_parquet(run.path("scores.parquet"), index=False)
+        run.add_artefact(run.dir / "scores.parquet", role="scores")
+        result.coverage.to_parquet(run.path("coverage.parquet"), index=False)
+        run.add_artefact(run.dir / "coverage.parquet", role="coverage")
+        board = result.leaderboard()
+        run.record("leaderboard", board.to_dict(orient="records"))
+        LOG.info("\n%s", board.to_string(index=False))
+    call = result.gate_verdict()
+    run.record("gate_verdict", call)
+    run.finalise()
+    LOG.info("%s", call)
+    return run
+
+
+def stage_pack(cfg: Config, simulate_run_id: str | None = None) -> Run:
+    """Build the custodian interview pack from a simulation run."""
+    from capplan.sim.simulate import SimulationResult
+
+    registry = _registry(cfg)
+    source = registry.resolve("simulate", simulate_run_id)
+    run = registry.new_run("pack", config=cfg)
+
+    result = _load_simulation(source.dir / "simulation.npz", grid=grid_from_config(cfg))
+    intervals = read_intervals()
+    diagnostics = run_all(exclude_anomalies=True)
+
+    # Growth comes from the simulate run that produced these numbers, so the
+    # rate quoted to a custodian is the one actually used. Falling back to the
+    # latest train run would risk quoting a rate from a different fit.
+    growth = _load_growth(source.dir / "growth.npz")
+    if not growth:
+        try:
+            train = registry.resolve("train")
+            growth = _load_growth(train.dir / "stage1.npz")
+            LOG.info("using growth rates from train run %s", train.run_id)
+        except FileNotFoundError:
+            LOG.warning(
+                "no growth rates found; the pack will say so rather than omit the "
+                "section silently"
+            )
+
+    backtest_verdict = ""
+    try:
+        backtest_verdict = registry.resolve("backtest").manifest.get("record", {}).get(
+            "verdict", ""
+        )
+    except FileNotFoundError:
+        LOG.info("no backtest run found; the pack will say so rather than imply a pass")
+
+    pack_dir = Path(cfg.get("serve.pack_dir", "artefacts/packs")) / run.run_id
+    written = generate_pack(
+        result,
+        pack_dir,
+        run_id=run.run_id,
+        growth=growth,
+        submission_bias=diagnostics.frames.get("submission_bias_summary"),
+        peak_interval_spread=diagnostics.frames.get("peak_interval_spread"),
+        coincidence_summary=diagnostics.frames.get("coincidence_summary"),
+        backtest_verdict=backtest_verdict,
+        normalisation_audit=audit_summary(intervals),
+        anomaly_report=anomaly_report(intervals),
+        interval_minutes=int(cfg.get("calendar.interval_minutes")),
+        prime_window=f"{cfg.get('calendar.prime_start')}-{cfg.get('calendar.prime_end')}",
+    )
+    run.record("pack_dir", str(pack_dir))
+    run.record("pages", len(written))
+    run.record("source_simulate_run", source.run_id)
+    run.finalise()
+    LOG.info("pack written to %s (%d pages)", pack_dir, len(written))
+    return run
+
+
+def _load_growth(path: Path) -> dict[str, float]:
+    if not path.exists():
+        return {}
+    with np.load(path, allow_pickle=True) as data:
+        if "growth" not in data.files or "apps" not in data.files:
+            return {}
+        return {str(a): float(g) for a, g in zip(data["apps"], data["growth"])}
+
+
+def _load_simulation(path: Path, grid):
+    from capplan.sim.reducers import PathSummary, get_reducer, reduce_by_fiscal_year
+    from capplan.sim.simulate import SimulationResult
+
+    with np.load(path, allow_pickle=True) as data:
+        result = SimulationResult(
+            daily_peaks=data["daily_peaks"],
+            daily_means=data["daily_means"],
+            daily_sum_app_peaks=data["daily_sum_app_peaks"],
+            app_peaks=data["app_peaks"],
+            days=[date.fromisoformat(str(d)) for d in data["days"]],
+            apps=[str(a) for a in data["apps"]],
+            fiscal_years=data["fiscal_years"],
+            dependence=str(data["dependence"]),
+            n_paths=int(data["daily_peaks"].shape[0]),
+        )
+        for key in data.files:
+            if key.startswith("reducer__"):
+                result.reducer_values[key[len("reducer__") :]] = data[key]
+
+    # Reducer-by-fiscal-year is cheap to rebuild and not worth persisting.
+    for name in result.reducer_values:
+        reducer = get_reducer(name)
+        by_fy: dict[int, list[float]] = {}
+        for p in range(result.n_paths):
+            path_summary = PathSummary(
+                daily_peaks=result.daily_peaks[p],
+                daily_means=result.daily_means[p],
+                days=result.days,
+                fiscal_years=result.fiscal_years,
+            )
+            for fy, value in reduce_by_fiscal_year(
+                path_summary, reducer, result.fiscal_years
+            ).items():
+                by_fy.setdefault(fy, []).append(value)
+        result.reducer_by_fy[name] = {fy: np.asarray(v) for fy, v in by_fy.items()}
+    result.diagnostics = result.coincidence()
+    return result
