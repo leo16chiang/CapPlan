@@ -1,7 +1,9 @@
 """CapPlan command line.
 
     capplan check          week-1 environment and dependency check
-    capplan ingest         land data into the lake (--synthetic to generate it)
+    capplan sources        list configured data sources
+    capplan probe          sample a source and check it against our assumptions
+    capplan ingest         extract from a source and land it in the lake
     capplan diagnostics    the two pure-SQL checks -- run these first
     capplan train          fit Stage 1 and calibrate
     capplan simulate       Stages 1-3, producing the fiscal-year distributions
@@ -11,8 +13,9 @@
     capplan reducers       list the available fiscal-year conventions
     capplan runs           list versioned runs
 
-The intended order for a first pass is `check`, `ingest`, `diagnostics`, and
-then a decision about whether to continue. The diagnostics can tell you to
+The intended order for a first pass is `check`, `probe`, `ingest`,
+`diagnostics`, and then a decision about whether to continue. `probe` is cheap
+and catches the mistakes that are expensive later; `diagnostics` can tell you to
 stop, and that is a legitimate outcome.
 """
 
@@ -20,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -44,9 +48,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("check", help="environment and dependency check")
 
-    p = sub.add_parser("ingest", help="land data into the parquet lake")
-    p.add_argument("--synthetic", action="store_true", help="generate synthetic data first")
+    p = sub.add_parser("ingest", help="extract from a source into the parquet lake")
+    p.add_argument(
+        "--source",
+        default="synthetic",
+        help="db2 | files | synthetic | existing (default: synthetic)",
+    )
+    p.add_argument("--synthetic", action="store_true", help="alias for --source synthetic")
+    p.add_argument("--from", dest="date_from", default=None, help="YYYY-MM-DD, inclusive")
+    p.add_argument("--to", dest="date_to", default=None, help="YYYY-MM-DD, inclusive")
+    p.add_argument("--sources-config", default="config/sources.yaml")
     p.add_argument("--seed", type=int, default=7)
+
+    p = sub.add_parser("probe", help="sample a source and report what came back")
+    p.add_argument("--source", default="db2")
+    p.add_argument("--from", dest="date_from", default=None)
+    p.add_argument("--to", dest="date_to", default=None)
+    p.add_argument("--sources-config", default="config/sources.yaml")
+
+    sub.add_parser("sources", help="list configured data sources")
 
     sub.add_parser("diagnostics", help="coincidence factor and submission bias (SQL only)")
 
@@ -93,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
 
         print(describe_reducers())
         return 0
+    if args.command == "sources":
+        return _sources()
 
     cfg = load_config(args.config)
     if args.set:
@@ -101,7 +123,21 @@ def main(argv: list[str] | None = None) -> int:
     from capplan import pipeline
 
     if args.command == "ingest":
-        run = pipeline.stage_ingest(cfg, synthetic=args.synthetic, seed=args.seed)
+        source = "synthetic" if args.synthetic else args.source
+        start, end = _window(args, cfg, source)
+        run = pipeline.stage_ingest(
+            cfg,
+            source_name=source,
+            start=start,
+            end=end,
+            seed=args.seed,
+            sources_path=args.sources_config,
+        )
+    elif args.command == "probe":
+        start, end = _window(args, cfg, args.source, default_days=7)
+        run = pipeline.stage_probe(
+            cfg, args.source, start, end, sources_path=args.sources_config
+        )
     elif args.command == "diagnostics":
         run = pipeline.stage_diagnostics(cfg)
     elif args.command == "train":
@@ -133,6 +169,52 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _window(args, cfg, source: str, default_days: int | None = None):
+    """Resolve --from / --to into dates.
+
+    A probe defaults to the last `default_days` of history, because the point is
+    to look at a little data quickly. An ingest has no default: an unbounded
+    extract against a production warehouse should be a deliberate act.
+    """
+    from datetime import date, timedelta
+
+    start = date.fromisoformat(args.date_from) if args.date_from else None
+    end = date.fromisoformat(args.date_to) if args.date_to else None
+
+    if source == "synthetic":
+        grid_end = end or date.today()
+        return start or (grid_end - timedelta(days=365 * 3)), grid_end
+    if default_days is not None:
+        end = end or date.today()
+        start = start or (end - timedelta(days=default_days))
+    if start is None or end is None:
+        raise SystemExit(
+            f"--from and --to are required for --source {source}. "
+            "An unbounded extract against a warehouse is not a default."
+        )
+    if start > end:
+        raise SystemExit(f"--from ({start}) is after --to ({end})")
+    return start, end
+
+
+def _sources() -> int:
+    from capplan.data.sources.base import available_sources
+    from capplan.data.sources.db2 import ENV_PREFIX, pyodbc_available
+
+    print("sources:")
+    for name in available_sources():
+        print(f"  {name}")
+    ok, message = pyodbc_available()
+    print(f"\ndb2 driver: {'ok' if ok else 'unavailable'} -- {message}")
+    print("\ndb2 credentials come from the environment, never from config/:")
+    for suffix in ("DSN", "HOST", "PORT", "DATABASE", "USER", "PASSWORD", "PASSWORD_CMD", "DRIVER"):
+        name = f"{ENV_PREFIX}{suffix}"
+        state = "set" if os.environ.get(name) else "--"
+        print(f"  [{state:>3}] {name}")
+    print("\nqueries live in config/sources.yaml; run `capplan probe` after editing them.")
+    return 0
+
+
 def _parse_override(item: str) -> tuple[str, object]:
     if "=" not in item:
         raise SystemExit(f"--set expects KEY=VALUE, got {item!r}")
@@ -148,7 +230,9 @@ def _runs(cfg, kind: str | None) -> int:
     from capplan.registry import Registry
 
     registry = Registry(cfg.get("registry.root", "artefacts"))
-    kinds = [kind] if kind else ["ingest", "diagnostics", "train", "simulate", "evaluate", "backtest", "pack"]
+    kinds = [kind] if kind else [
+        "probe", "ingest", "diagnostics", "train", "simulate", "evaluate", "backtest", "pack",
+    ]
     for k in kinds:
         ids = registry.list_runs(k)
         if ids:
@@ -165,6 +249,7 @@ def _check() -> int:
     print(f"capplan {__version__}, python {sys.version.split()[0]}\n")
     required = ["numpy", "scipy", "pandas", "duckdb", "pyarrow", "yaml"]
     optional = {
+        "pyodbc": "Db2 extraction. Also needs the IBM Db2 ODBC driver on the machine.",
         "torch": "Stage 1 neural backend. LARGE WHEEL -- this is the week-1 proxy question.",
         "neuralforecast": "N-HiTS / TFT. Pulls torch.",
         "statsforecast": "SARIMA baseline.",

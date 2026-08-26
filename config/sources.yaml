@@ -1,0 +1,163 @@
+# Where CapPlan's four tables come from.
+#
+# This file is IN VERSION CONTROL. It holds table names, column names and SQL.
+# It holds NO credentials -- those come from the environment, see
+# capplan/data/sources/db2.py.
+#
+# The queries below are TEMPLATES. Every table and column name is a guess at
+# what your SMF warehouse calls things, and none of them will be right. Edit
+# them; the contract is only that each query returns the aliased column names
+# CapPlan expects (`AS ts`, `AS app_id`, ...). Run `capplan probe` after each
+# edit -- it samples a few hundred rows and tells you what came back.
+#
+# Two parameter markers per query, in this order:
+#     ?  window start (inclusive)
+#     ?  window end   (exclusive)
+# CapPlan passes datetime.date objects and lets the driver bind them. Do not
+# format dates into the SQL yourself.
+
+default_source: db2
+
+db2:
+  # A month per round trip. Lower it if the gateway times out on long queries;
+  # raise it if per-query overhead dominates.
+  chunk_days: 30
+  fetch_batch_rows: 50000
+
+  queries:
+
+    # ---------------------------------------------------------------------
+    # intervals -- SMF 72 subtype 3 (Workload Activity)
+    #
+    # One row per (application, LPAR, interval). "Application" is whatever your
+    # site maps to: service class, report class, or a lookup table keyed on
+    # them. That mapping is a decision, not a detail -- if two applications
+    # share a service class, CapPlan cannot tell them apart and the custodian
+    # interview will go badly.
+    #
+    # Return `msu` OR `mips`; normalisation derives the other from the
+    # capture ratio and MIPS-per-MSU in config/capplan.yaml. If your warehouse
+    # stores CPU seconds instead, convert here: an interval's MSU is roughly
+    #     cpu_seconds / interval_seconds * msu_per_engine
+    # but use your site's own conversion -- CapPlan applies what it is given
+    # and does not second-guess it.
+    #
+    # The prime-time predicate is in SQL on purpose: prime time is ~21% of the
+    # week, so filtering here means the network carries a fifth of the rows.
+    # `capplan ingest` re-applies the filter itself, so an over-broad query is
+    # correct but slow, never wrong.
+    # ---------------------------------------------------------------------
+    intervals: |
+      SELECT
+          W.SMF_INTERVAL_START           AS ts,
+          W.LPAR_NAME                    AS lpar,
+          COALESCE(M.APPLICATION_ID, W.REPORT_CLASS) AS app_id,
+          W.ENVIRONMENT                  AS environment,
+          W.MSU_CONSUMED                 AS msu,
+          W.CPU_MODEL                    AS cpu_model
+      FROM SMF.WORKLOAD_72_3 W
+      LEFT JOIN SMF.APP_MAPPING M
+             ON M.REPORT_CLASS = W.REPORT_CLASS
+            AND M.LPAR_NAME    = W.LPAR_NAME
+      WHERE W.SMF_INTERVAL_START >= ?
+        AND W.SMF_INTERVAL_START <  ?
+        AND W.ENVIRONMENT = 'PROD'
+        AND HOUR(W.SMF_INTERVAL_START) >= 8
+        AND HOUR(W.SMF_INTERVAL_START) <  17
+        AND DAYOFWEEK_ISO(W.SMF_INTERVAL_START) <= 5
+
+    # ---------------------------------------------------------------------
+    # lpar_totals -- SMF 70 subtype 1 (RMF CPU Activity)
+    #
+    # READ THIS BEFORE EDITING.
+    #
+    # This MUST come from SMF 70-1, measured at the LPAR. It must NOT be
+    # derived by summing the `intervals` rows above.
+    #
+    # The whole evaluation strategy is: simulate the LPAR peak from
+    # application-level data, then check it against what the LPAR actually did.
+    # If the "actual" is itself a sum of application rows, the backtest
+    # compares the simulation against its own assumption and passes no matter
+    # how wrong the coincidence model is. That failure stays invisible until a
+    # hardware configuration has been signed.
+    #
+    # A daily aggregate is enough: the peak interval, when it happened, and the
+    # daily mean. The same prime-time predicate applies.
+    # ---------------------------------------------------------------------
+    lpar_totals: |
+      SELECT
+          DATE(P.SMF_INTERVAL_START)     AS business_date,
+          P.LPAR_NAME                    AS lpar,
+          MAX(P.MIPS_USED)               AS peak_mips,
+          AVG(P.MIPS_USED)               AS mean_mips,
+          (MAX(P.MIPS_USED * 1000 + P.INTERVAL_INDEX)
+             - MAX(P.MIPS_USED) * 1000)  AS peak_interval_idx
+      FROM SMF.PARTITION_70_1 P
+      WHERE P.SMF_INTERVAL_START >= ?
+        AND P.SMF_INTERVAL_START <  ?
+        AND P.ENVIRONMENT = 'PROD'
+        AND HOUR(P.SMF_INTERVAL_START) >= 8
+        AND HOUR(P.SMF_INTERVAL_START) <  17
+        AND DAYOFWEEK_ISO(P.SMF_INTERVAL_START) <= 5
+      GROUP BY DATE(P.SMF_INTERVAL_START), P.LPAR_NAME
+
+    # ---------------------------------------------------------------------
+    # events -- DR / IST / GCC SDF windows, from the change calendar.
+    #
+    # Out of scope as forecast TARGETS, but they land in prime time and have to
+    # be labelled. Unlabelled, Stage 1 fits them as ordinary variation and
+    # Stage 2 resamples the DR day as if it were a normal Tuesday -- one
+    # historical DR exercise becomes a recurring feature of the forward
+    # distribution.
+    #
+    # `lpar` and `app_id` accept '*' as a wildcard for site-wide events.
+    # If there is no change-calendar table, delete this query: the robust-z
+    # spike detector will flag candidates for a human to confirm, which is
+    # worse but not nothing.
+    # ---------------------------------------------------------------------
+    events: |
+      SELECT
+          C.CHANGE_ID                    AS event_id,
+          C.EVENT_TYPE                   AS event_type,
+          COALESCE(C.LPAR_NAME, '*')     AS lpar,
+          COALESCE(C.APPLICATION_ID, '*') AS app_id,
+          C.WINDOW_START                 AS start_ts,
+          C.WINDOW_END                   AS end_ts,
+          C.DESCRIPTION                  AS note
+      FROM CHANGE.CALENDAR C
+      WHERE C.WINDOW_END   >= ?
+        AND C.WINDOW_START <  ?
+        AND C.EVENT_TYPE IN ('DR', 'IST', 'GCC_SDF')
+
+    # ---------------------------------------------------------------------
+    # submissions -- what custodians forecast in previous cycles.
+    #
+    # Powers the per-app bias score, which is both the honest benchmark and the
+    # opening of every custodian interview. `fiscal_year` is the year the
+    # submission is ABOUT, not the year it was made.
+    # ---------------------------------------------------------------------
+    submissions: |
+      SELECT
+          S.APPLICATION_ID               AS app_id,
+          S.TARGET_FISCAL_YEAR           AS fiscal_year,
+          S.SUBMITTED_ON                 AS submitted_on,
+          S.PEAK_MIPS_FORECAST           AS submitted_peak_mips,
+          S.BASIS                        AS basis
+      FROM CAPACITY.SUBMISSIONS S
+      WHERE S.SUBMITTED_ON >= ?
+        AND S.SUBMITTED_ON <  ?
+
+  # Fallback renaming, for when you cannot change the SQL (a view you do not
+  # own, a DBA who will not add aliases). Applied after column names are
+  # lower-cased. Prefer aliasing in the query.
+  column_map:
+    intervals: {}
+    lpar_totals: {}
+    events: {}
+    submissions: {}
+
+# Landing-directory source: one file or glob per table, columns already named
+# as CapPlan expects. For when someone else runs the extract on a schedule.
+files:
+  root: data_drop
+  column_map: {}

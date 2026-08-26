@@ -20,7 +20,7 @@ from capplan.config import Config
 from capplan.data.calendar import grid_from_config
 from capplan.data.event_labels import anomaly_report
 from capplan.data.ingest import bootstrap_synthetic_lake, read_intervals, read_table
-from capplan.data.mips_normalisation import audit_summary
+from capplan.data.mips_normalisation import NormalisationTable, audit_summary
 from capplan.diagnostics import run_all
 from capplan.diagnostics.runner import verdict as diagnostics_verdict
 from capplan.logging_utils import get_logger
@@ -44,19 +44,224 @@ def _registry(cfg: Config) -> Registry:
 # --------------------------------------------------------------------------
 
 
-def stage_ingest(cfg: Config, synthetic: bool = False, seed: int = 7) -> Run:
-    """Land data into the lake. `synthetic=True` generates it first."""
-    grid = grid_from_config(cfg)
-    run = _registry(cfg).new_run("ingest", config=cfg, tags=["synthetic"] if synthetic else [])
-    if synthetic:
-        written, report = bootstrap_synthetic_lake(cfg, grid, seed=seed)
-        run.record_inputs({"source": "synthetic", "seed": seed})
-        run.record_metrics(report.to_dict())
-        run.write_json("ingest_report.json", report.to_dict())
+def load_sources_config(path: str | Path = "config/sources.yaml") -> dict:
+    """Query templates and column maps. Never credentials."""
+    import yaml
+
+    resolved = Path(path)
+    if not resolved.exists():
+        raise FileNotFoundError(
+            f"{resolved} not found. It holds the SQL that pulls your SMF tables; "
+            "copy the template from the repository and edit the table names."
+        )
+    return yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+
+
+def build_source(cfg: Config, name: str, sources_cfg: dict, seed: int = 7):
+    """Construct a source by name from config/sources.yaml."""
+    from capplan.data.sources import get_source
+
+    section = dict(sources_cfg.get(name) or {})
+    if name == "synthetic":
+        section.setdefault("grid", grid_from_config(cfg))
+        section.setdefault("n_apps", int(cfg.get("scope.top_n_apps", 35)))
+        section.setdefault("seed", seed)
+    return get_source(name, **section)
+
+
+def stage_probe(
+    cfg: Config,
+    source_name: str,
+    start: date,
+    end: date,
+    sources_path: str | Path = "config/sources.yaml",
+) -> Run:
+    """Sample the source and check it against what CapPlan assumes.
+
+    Run this before a full extract, and again after every edit to the query
+    templates. It reads a few hundred rows, not the archive.
+    """
+    sources_cfg = load_sources_config(sources_path)
+    source = build_source(cfg, source_name, sources_cfg)
+    run = _registry(cfg).new_run("probe", config=cfg, tags=[source_name])
+
+    report = source.probe(start, end)
+    findings = _probe_findings(report, cfg)
+    report["findings"] = findings
+    run.write_json("probe.json", report)
+    run.record("findings", findings)
+    run.finalise()
+
+    LOG.info("probe of %s over %s..%s", source_name, start, end)
+    for line in findings:
+        LOG.info("  %s", line)
+    return run
+
+
+def _probe_findings(report: dict, cfg: Config) -> list[str]:
+    """Turn a raw profile into the sentences a reviewer needs to read.
+
+    Deliberately opinionated. A profile nobody interprets is a profile nobody
+    acts on, and every check below corresponds to a way the pipeline goes
+    quietly wrong rather than loudly wrong.
+    """
+    out: list[str] = []
+    expected_minutes = int(cfg.get("calendar.interval_minutes"))
+
+    intervals = report.get("intervals") or {}
+    if not intervals.get("rows_sampled"):
+        out.append(
+            "FAIL intervals: the query returned nothing. Nothing else can run."
+        )
     else:
+        observed = intervals.get("interval_minutes_mode")
+        if observed is None:
+            out.append("WARN intervals: could not infer the interval length from the sample.")
+        elif abs(observed - expected_minutes) > 1e-6:
+            out.append(
+                f"FAIL intervals: SMF intervals look like {observed:g} minutes, but "
+                f"calendar.interval_minutes is {expected_minutes}. Fix the config before "
+                "anything else -- the prime-time grid, the row count that justifies a "
+                "neural Stage 1, and every downstream index depend on it."
+            )
+        else:
+            per_day = intervals.get("intervals_per_day_implied")
+            out.append(
+                f"OK intervals: {observed:g}-minute intervals, matching config"
+                + (f" ({per_day} per prime-time day)" if per_day else "")
+            )
+        distinct = intervals.get("distinct_app_id", 0)
+        target = int(cfg.get("scope.top_n_apps", 35))
+        if distinct <= 1:
+            out.append(
+                f"FAIL intervals: only {distinct} distinct app_id in the sample. The "
+                "service-class/report-class to application mapping is probably not "
+                "joining -- check SMF.APP_MAPPING."
+            )
+        elif distinct < target:
+            out.append(
+                f"WARN intervals: {distinct} distinct app_id in the sample against a "
+                f"top_n_apps of {target}. Fine if the sample window is short; a problem "
+                "if it is not."
+            )
+        else:
+            out.append(f"OK intervals: {distinct} distinct app_id in the sample")
+        if not any(k.startswith(("msu_", "mips_")) for k in intervals):
+            out.append("FAIL intervals: neither msu nor mips came back.")
+        for column in ("msu", "mips"):
+            if intervals.get(f"{column}_nulls"):
+                out.append(
+                    f"WARN intervals: {intervals[f'{column}_nulls']} null {column} values "
+                    "in the sample. A missing interval is not a zero -- decide which "
+                    "this is before ingesting."
+                )
+
+    totals = report.get("lpar_totals") or {}
+    if not totals.get("rows_sampled"):
+        out.append(
+            "FAIL lpar_totals: nothing came back. Without realised SMF 70-1 LPAR peaks "
+            "there is no simulation backtest, and without that there is no evidence the "
+            "coincidence model is right. This is the most important dependency in the "
+            "project -- resolve it now, not in week six."
+        )
+    else:
+        out.append(f"OK lpar_totals: {totals['rows_sampled']} rows sampled")
+
+    events = report.get("events") or {}
+    if not events.get("rows_sampled"):
+        out.append(
+            "WARN events: no DR/IST/GCC SDF windows. They will only be caught by the "
+            "robust-z spike detector, which flags candidates for a human rather than "
+            "labelling them. Workable, worse."
+        )
+    else:
+        out.append(
+            f"OK events: {events['rows_sampled']} windows, types "
+            f"{events.get('sample_event_type', [])}"
+        )
+
+    submissions = report.get("submissions") or {}
+    if not submissions.get("rows_sampled"):
+        out.append(
+            "WARN submissions: none found. No per-app bias score, and no benchmark to "
+            "beat -- the model would have nothing to be better than."
+        )
+    else:
+        out.append(f"OK submissions: {submissions['rows_sampled']} rows sampled")
+    return out
+
+
+def stage_ingest(
+    cfg: Config,
+    source_name: str = "synthetic",
+    start: date | None = None,
+    end: date | None = None,
+    seed: int = 7,
+    sources_path: str | Path = "config/sources.yaml",
+) -> Run:
+    """Extract from a source, scope it, and land it in the lake."""
+    from capplan.data.ingest import scope_intervals, write_lake
+    from capplan.data.sources.sql import extract_to_frames
+
+    grid = grid_from_config(cfg)
+    run = _registry(cfg).new_run("ingest", config=cfg, tags=[source_name])
+
+    if source_name == "existing":
         intervals = read_intervals()
         run.record_inputs({"source": "existing lake", "rows": len(intervals)})
         run.record_metrics({"rows": len(intervals), "apps": intervals["app_id"].nunique()})
+        run.finalise()
+        return run
+
+    if start is None or end is None:
+        raise ValueError(
+            "ingest needs --from and --to. An unbounded extract against a warehouse "
+            "is how you find out what your DBA's alerting threshold is."
+        )
+
+    sources_cfg = load_sources_config(sources_path) if source_name != "synthetic" else {}
+    source = build_source(cfg, source_name, sources_cfg, seed=seed)
+    frames, extract = extract_to_frames(
+        source, ("intervals", "lpar_totals", "events", "submissions"), start, end
+    )
+    run.record_inputs({"source": source_name, "from": str(start), "to": str(end)})
+    run.write_json("extract_report.json", extract.to_dict())
+
+    if "intervals" not in frames:
+        run.finalise(status="failed", note="source returned no interval rows")
+        raise RuntimeError(
+            f"source {source_name!r} returned no interval rows for {start}..{end}. "
+            "Run `capplan probe` to see what the queries actually return."
+        )
+
+    # Label anomalies before scoping, so an event window that covers a
+    # non-prime interval still marks the prime-time part of the same day.
+    intervals = frames["intervals"]
+    if "events" in frames:
+        from capplan.data.event_labels import label_from_windows
+
+        intervals = label_from_windows(intervals, frames["events"])
+
+    scoped, report = scope_intervals(
+        intervals, grid, cfg, NormalisationTable.from_config(cfg)
+    )
+    from capplan.data.schema import conform
+
+    written = write_lake(
+        {
+            name: conform(frame, name, grid)
+            for name, frame in (
+                ("intervals", scoped),
+                ("events", frames.get("events")),
+                ("submissions", frames.get("submissions")),
+                ("lpar_totals", frames.get("lpar_totals")),
+            )
+            if frame is not None
+        }
+    )
+    run.record_metrics({**report.to_dict(), **extract.to_dict()["rows_by_table"]})
+    run.write_json("ingest_report.json", report.to_dict())
+    run.record("written", {k: str(v) for k, v in written.items()})
     run.finalise()
     return run
 

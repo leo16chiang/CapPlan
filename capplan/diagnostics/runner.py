@@ -29,7 +29,13 @@ def read_sql(name: str) -> str:
 
 
 def connect(root: Path = paths.LAKE_ROOT) -> duckdb.DuckDBPyConnection:
-    """In-process connection with the lake registered as views."""
+    """In-process connection with the lake registered as views.
+
+    Records which tables are actually present. A first real extract typically
+    has `intervals` and little else, and the diagnostics that need the missing
+    tables should say so plainly rather than raising a binder error out of the
+    middle of a SQL file.
+    """
     con = duckdb.connect(":memory:")
     registrations = {
         "intervals": root / "intervals" / "intervals.parquet",
@@ -45,6 +51,24 @@ def connect(root: Path = paths.LAKE_ROOT) -> duckdb.DuckDBPyConnection:
         else:
             LOG.warning("lake table %s not present at %s", name, path)
     return con
+
+
+def registered_tables(con: duckdb.DuckDBPyConnection) -> set[str]:
+    """Which lake views this connection actually has.
+
+    Read from the catalog rather than tracked alongside it: a DuckDB connection
+    does not accept attribute assignment, and asking the database what it holds
+    cannot drift from what it holds.
+    """
+    rows = con.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def _has(con: duckdb.DuckDBPyConnection, *tables: str) -> bool:
+    present = registered_tables(con)
+    return all(t in present for t in tables)
 
 
 @dataclass
@@ -76,6 +100,13 @@ def run_coincidence(
     is load-bearing. Anything below ~0.95 means app peaks genuinely do not
     coincide and adding them up overstates the LPAR.
     """
+    if not _has(con, "intervals", "lpar_totals"):
+        LOG.warning(
+            "coincidence needs both intervals and lpar_totals. Without realised "
+            "SMF 70-1 LPAR peaks the coincidence factor cannot be measured, and "
+            "measuring it is the go/no-go for this whole approach."
+        )
+        return DiagnosticsResult(frames={"coincidence_daily": pd.DataFrame()})
     daily = con.execute(
         read_sql("coincidence"), {"exclude_anomalies": exclude_anomalies}
     ).df()
@@ -125,6 +156,13 @@ def run_coincidence(
 
 def run_submission_bias(con: duckdb.DuckDBPyConnection) -> DiagnosticsResult:
     """Per-app custodian forecast bias across cycles."""
+    if not _has(con, "intervals", "submissions"):
+        LOG.warning(
+            "no submissions table: skipping the per-app bias score. That also "
+            "removes the benchmark -- without it there is nothing for the model "
+            "to be better than."
+        )
+        return DiagnosticsResult(frames={"submission_bias_detail": pd.DataFrame()})
     detail = con.execute(read_sql("submission_bias")).df()
     if detail.empty:
         LOG.warning("no submissions joined to realised peaks; skipping bias score")
@@ -155,6 +193,9 @@ def run_submission_bias(con: duckdb.DuckDBPyConnection) -> DiagnosticsResult:
 
 
 def run_data_profile(con: duckdb.DuckDBPyConnection) -> DiagnosticsResult:
+    if not _has(con, "intervals"):
+        LOG.error("no intervals table in the lake; nothing to profile")
+        return DiagnosticsResult(frames={"data_profile": pd.DataFrame()})
     profile = con.execute(read_sql("data_profile")).df()
     headline: dict[str, float] = {}
     if not profile.empty:

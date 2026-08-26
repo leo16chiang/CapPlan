@@ -17,6 +17,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Db2 extraction. Also needs the IBM Db2 ODBC driver installed on the machine --
+# the Python package alone is not enough.
+db2 = ["pyodbc>=5.0"]
 # Stage 1 neural backend. torch is a large wheel -- confirm the internal mirror
 # carries it before promising this path (see docs/week1_checklist.md).
 neural = ["torch>=2.1", "neuralforecast>=1.7"]

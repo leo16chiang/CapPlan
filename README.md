@@ -37,9 +37,23 @@ error. It is one transposition away, which is why the sum is a named step.
 pip install -e '.[dev]'
 
 capplan check                     # environment; answers the torch/proxy question
-capplan ingest --synthetic        # or point it at a real SMF extract
+capplan ingest --synthetic        # runs end to end with no database
 capplan diagnostics               # <- the go/no-go decision
 ```
+
+With your own data, from Db2 (see `docs/data_input.md`):
+
+```bash
+pip install -e '.[db2]'
+export CAPPLAN_DB2_HOST=... CAPPLAN_DB2_DATABASE=... CAPPLAN_DB2_USER=... CAPPLAN_DB2_PASSWORD=...
+capplan sources                                    # driver? env vars?
+# edit config/sources.yaml -- the table names are guesses
+capplan probe  --source db2 --from 2025-06-01 --to 2025-06-07
+capplan ingest --source db2 --from 2022-11-01 --to 2025-10-31
+```
+
+`capplan probe` samples a few hundred rows and checks them against what CapPlan
+assumes -- interval length above all. Run it after every edit to the queries.
 
 `capplan diagnostics` is two pure-SQL queries over data you already hold, and it
 can tell you to stop. If the coincidence factor comes back near 1.0, application
@@ -139,6 +153,7 @@ argument for the neural backend changes with it.
 
 ## Documentation
 
+- `docs/data_input.md` -- getting your SMF data in, from Db2 or a file drop
 - `docs/week1_checklist.md` -- what to confirm before writing more code
 - `docs/architecture.md` -- why each stage is shaped the way it is
 - `docs/defects_found.md` -- bugs this codebase caught by measuring its own output (ten of them)

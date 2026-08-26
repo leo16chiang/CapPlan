@@ -34,10 +34,22 @@ Nothing is blocked either way: Stage 1 runs on `quantile_ridge` (IRLS on the
 pinball loss, pure numpy) and clears the baseline gate on its own. But the
 answer changes what gets promised in week 3.
 
-## 3. Run the two SQL diagnostics -- and be willing to stop
+## 3. Point it at the real data and probe before extracting
 
 ```bash
-capplan ingest            # point at the real extract
+capplan sources                                       # driver + env vars
+capplan probe --source db2 --from 2025-06-01 --to 2025-06-07
+```
+
+`probe` reads a few hundred rows and reports what came back, including the
+inferred interval length. It is where step 1 is actually settled, and where a
+non-joining application mapping shows up as "1 distinct app_id" rather than as a
+forecast for one enormous application. See `docs/data_input.md`.
+
+## 4. Run the two SQL diagnostics -- and be willing to stop
+
+```bash
+capplan ingest --source db2 --from 2022-11-01 --to 2025-10-31
 capplan diagnostics
 ```
 
@@ -50,7 +62,7 @@ percentage, which is exactly what Stage 2 removes.
 The submission-bias table sets the benchmark. If custodians are already
 unbiased, the bar is higher than expected.
 
-## 4. Confirm the definitions with the capacity manager
+## 5. Confirm the definitions with the capacity manager
 
 Each of these changes the answer more than any modelling choice, and none of
 them is a modelling question:
@@ -69,7 +81,7 @@ them is a modelling question:
 - **Business-day calendar.** Load the real holiday list into
   `config/holidays.txt`. Nothing else needs to change.
 
-## 5. Confirm the data you need actually exists
+## 6. Confirm the data you need actually exists
 
 - **SMF 70-1 LPAR totals.** Without realised LPAR peaks there is no simulation
   backtest, and without a simulation backtest there is no evidence the
@@ -83,7 +95,7 @@ them is a modelling question:
   A re-platformed application looks like a step change the model will
   extrapolate.
 
-## 6. Sanity-check what the profile says
+## 7. Sanity-check what the profile says
 
 ```bash
 capplan diagnostics

@@ -60,6 +60,49 @@ EVENT_COLUMNS: dict[str, str] = {
 }
 
 
+# Columns CapPlan can derive or default when a site's extract does not carry
+# them. A first extract almost never has all of these -- `peak_interval_idx`
+# in particular requires an ARG_MAX the warehouse may not make easy -- and
+# failing the run over a column that only feeds one diagnostic chart would be
+# the wrong trade. They are filled with an explicit "unknown" marker rather
+# than a plausible-looking value.
+OPTIONAL_DEFAULTS: dict[str, dict[str, object]] = {
+    "intervals": {
+        "environment": "PROD",
+        "is_anomaly": False,
+        "event_label": None,
+        "capture_ratio": 1.0,
+    },
+    "lpar_totals": {
+        "peak_interval_idx": -1,   # -1 = not supplied, never a real interval
+        "mean_mips": float("nan"),
+    },
+    "events": {"event_id": None, "lpar": "*", "app_id": "*", "note": None},
+    "submissions": {"submitted_on": None, "basis": None},
+}
+
+
+def conform(frame, table: str, grid=None):
+    """Fill derivable and defaultable columns so downstream SQL can rely on them.
+
+    Two derivations rather than defaults, because a wrong value here is worse
+    than a missing one:
+      * `business_date` from `ts`
+      * `fiscal_year` from `business_date`, using the configured calendar
+    """
+    import pandas as pd
+
+    out = frame.copy()
+    if "ts" in out.columns and "business_date" not in out.columns:
+        out["business_date"] = pd.to_datetime(out["ts"]).dt.date
+    if grid is not None and "business_date" in out.columns and "fiscal_year" not in out.columns:
+        out["fiscal_year"] = [grid.fiscal_year(d) for d in out["business_date"]]
+    for column, default in OPTIONAL_DEFAULTS.get(table, {}).items():
+        if column not in out.columns:
+            out[column] = default
+    return out
+
+
 @dataclass(frozen=True)
 class SchemaError(Exception):
     """Raised when an ingested frame does not match the declared schema."""
