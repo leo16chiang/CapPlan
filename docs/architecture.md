@@ -14,8 +14,9 @@ one you kept is the noisiest.
 
 **Peaks do not sum.** Applications peak in different intervals. Adding their
 individual peaks assumes simultaneity that does not exist. Measured on the
-synthetic panel, summing overstates the LPAR by 33%; the coincidence factor is
-0.75.
+a workload where applications peak at genuinely different times, summing
+overstates the LPAR substantially. How much is site-specific and is exactly
+what `capplan diagnostics` measures.
 
 ## The resolution: never forecast a peak
 
@@ -121,10 +122,11 @@ application-level numbers with no application history; only reduced
 `(paths, days)` series survive. Measured peak allocation: 116 MB.
 
 **The reducer is pluggable because the question is open.** Annual maximum, mean
-of monthly peaks, 95th percentile of daily peaks -- these differ by 21% on the
-synthetic panel, more than the modelling uncertainty. `reduce(path) -> scalar`
-is the seam; when the definition is settled, one function is added and nothing
-else changes.
+of monthly peaks, 95th percentile of daily peaks, monthly peak R4HA -- and they
+answer different questions, so the gaps between them are typically larger than
+the modelling uncertainty within any one. `reduce(path) -> scalar` is the seam;
+when the definition is settled, one function is added and nothing else
+changes.
 
 The contract is a `PathSummary` (daily peak series, daily means, dates) rather
 than the raw interval cube, because handing a reducer the raw cube would require

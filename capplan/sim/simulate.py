@@ -186,9 +186,19 @@ def simulate(
     residual_scaling: str = "spread",
     dependence: str = "block_bootstrap",
     r4ha_hours: float = 4.0,
+    coincidence_factor=None,
     progress_every: int = 5,
 ) -> SimulationResult:
     """Sample paths from the joint model and reduce them.
+
+    `coincidence_factor` is for daily-grain runs, where the forecast has one
+    value per (application, day) and the interval axis is degenerate. With one
+    interval the peak of the sum IS the sum of the application peaks, which is
+    the overstatement the architecture exists to remove -- so a
+    `CoincidenceFactor` estimated from a short hourly sample is resampled per
+    (path, day) and applied. Passing one at sub-daily grain is refused: the
+    coincidence is already in the data and applying a factor on top would
+    discount it twice.
 
     `sampler` needs one method: `stream(size, n_days, rng)`, returning an object
     with `day(d) -> (size, apps, intervals)` of residuals on the residual scale.
@@ -206,6 +216,21 @@ def simulate(
 
     reducer_objs = [get_reducer(name) for name in reducers]
     retain_intervals = any(r.needs_intervals for r in reducer_objs)
+
+    if coincidence_factor is not None and n_int > 1:
+        raise ValueError(
+            f"a coincidence factor was supplied but the forecast has {n_int} intervals "
+            "per day, so the coincidence is already represented in the data. Applying "
+            "the factor as well would discount it twice."
+        )
+    if coincidence_factor is None and n_int == 1:
+        LOG.warning(
+            "daily-grain forecast with no coincidence factor: the 'peak of the sum' "
+            "reduces to the SUM OF APPLICATION PEAKS, which overstates the LPAR peak "
+            "by whatever the coincidence factor would have removed -- typically 25-35%%. "
+            "Estimate one from an hourly sample (capplan coincidence) or read the "
+            "result as an explicit upper bound."
+        )
 
     # The rolling 4-hour average is accumulated inside the loop with a ring
     # buffer, never reconstructed afterwards -- reconstructing it would need
@@ -279,6 +304,15 @@ def simulate(
 
             # SUM ACROSS APPS, then take the maximum. Not the other way round.
             total = per_app.sum(axis=1)                             # (size, intervals)
+            if coincidence_factor is not None:
+                # Resampled per (path, day), not applied as a constant: the
+                # factor varies day to day and collapsing it to its mean would
+                # understate the spread of the forecast peak by exactly that
+                # variation.
+                factors = coincidence_factor.draw_for_weekday(
+                    forecast.days[d].weekday(), size, rng
+                ).astype(np.float32)
+                total = total * factors[:, None]
             daily_peaks[lo:hi, d] = total.max(axis=1)
             daily_means[lo:hi, d] = total.mean(axis=1)
             if chunk_intervals is not None:
@@ -333,6 +367,12 @@ def simulate(
         "n_intervals": n_int,
         "residual_scaling": residual_scaling,
         "r4ha_window_intervals": r4ha_window if want_r4ha else 0,
+        "coincidence_factor_applied": coincidence_factor is not None,
+        **(
+            {f"transferred_{k}": v for k, v in coincidence_factor.summary().items()}
+            if coincidence_factor is not None
+            else {}
+        ),
         "peak_chunk_working_mb": peak_bytes / 1e6,
         "accumulator_mb": (
             daily_peaks.nbytes

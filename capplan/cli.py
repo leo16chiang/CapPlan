@@ -6,6 +6,7 @@
     capplan probe          sample a source and check it against our assumptions
     capplan ingest         extract from a source and land it in the lake
     capplan diagnostics    the two pure-SQL checks -- run these first
+    capplan coincidence    estimate the coincidence factor for daily-grain runs
     capplan train          fit Stage 1 and calibrate
     capplan simulate       Stages 1-3, producing the fiscal-year distributions
     capplan evaluate       rolling-origin scoring against the baselines
@@ -80,6 +81,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("diagnostics", help="coincidence factor and submission bias (SQL only)")
 
+    p = sub.add_parser(
+        "coincidence",
+        help="estimate the coincidence factor from sub-daily data (for daily-grain runs)",
+    )
+    p.add_argument(
+        "--sample-days",
+        type=int,
+        default=None,
+        help="use only the most recent N business days of sub-daily history",
+    )
+
     p = sub.add_parser("train", help="fit Stage 1 and calibrate")
     p.add_argument("--no-calibrate", action="store_true")
 
@@ -133,12 +145,28 @@ def main(argv: list[str] | None = None) -> int:
         print(describe_catalogue())
         return 0
 
-    cfg = load_config(args.config)
-    if args.set:
-        cfg = cfg.with_overrides(dict(_parse_override(item) for item in args.set))
-
     from capplan import pipeline
 
+    try:
+        # Inside the guard: a missing or malformed config file is the most
+        # common configuration error there is, and it deserves the same
+        # treatment as the rest rather than a traceback.
+        cfg = load_config(args.config)
+        if args.set:
+            cfg = cfg.with_overrides(dict(_parse_override(item) for item in args.set))
+        return _dispatch(args, cfg, pipeline)
+    except _EXPECTED_FAILURES as exc:
+        # These are configuration and environment problems, not bugs. A
+        # traceback here tells the user nothing they can act on and buries the
+        # one line that does.
+        print(f"\n{type(exc).__name__}: {exc}\n", file=sys.stderr)
+        hint = _HINTS.get(type(exc).__name__)
+        if hint:
+            print(hint, file=sys.stderr)
+        return 2
+
+
+def _dispatch(args, cfg, pipeline) -> int:
     if args.command == "ingest":
         source = "synthetic" if args.synthetic else args.source
         start, end = _window(args, cfg, source)
@@ -157,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "diagnostics":
         run = pipeline.stage_diagnostics(cfg)
+    elif args.command == "coincidence":
+        run = pipeline.stage_coincidence(cfg, sample_days=args.sample_days)
     elif args.command == "train":
         run = pipeline.stage_train(cfg, calibrate=not args.no_calibrate)
     elif args.command == "simulate":
@@ -184,6 +214,53 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\nrun {run.kind}/{run.run_id} -> {run.dir}")
     return 0
+
+
+def _expected_failures():
+    """Errors that mean 'your configuration is wrong', not 'this is broken'."""
+    from capplan.config import ConfigError
+    from capplan.data.sources.db2 import Db2Unavailable
+    from capplan.data.sources.sql import SchemaDriftError
+    from capplan.data.tables import DoubleCountError
+    from capplan.model.backends import NeuralUnavailable
+
+    return (
+        NeuralUnavailable,
+        Db2Unavailable,
+        SchemaDriftError,
+        DoubleCountError,
+        ConfigError,
+        FileNotFoundError,
+    )
+
+
+_EXPECTED_FAILURES = _expected_failures()
+
+_HINTS = {
+    "NeuralUnavailable": (
+        "The pipeline runs without it. Either install the neural extra:\n"
+        "    pip download torch --no-deps -d /tmp/torchcheck   # confirm the mirror\n"
+        "    pip install -e '.[neural]'\n"
+        "or stay on the linear backend, which clears the baseline gate on its own:\n"
+        "    capplan --set model.backend=quantile_ridge <command>"
+    ),
+    "Db2Unavailable": (
+        "Check `capplan sources` for which variables are set and whether a .env\n"
+        "file was found. Credentials belong in .env, never in config/."
+    ),
+    "SchemaDriftError": (
+        "Alias the column in config/sources.yaml (e.g. `SELECT SMF_TS AS ts`),\n"
+        "or add a column_map entry. Then re-run `capplan probe`."
+    ),
+    "DoubleCountError": (
+        "Run `capplan tables`. Only a SPINE source may feed 'intervals' --\n"
+        "driver and attribution tables overlap it, so their CPU is already counted."
+    ),
+    "FileNotFoundError": (
+        "If this names a lake table, run `capplan ingest` first.\n"
+        "If it names a run, that stage has not been run yet -- see `capplan runs`."
+    ),
+}
 
 
 def _window(args, cfg, source: str, default_days: int | None = None):
@@ -249,7 +326,8 @@ def _runs(cfg, kind: str | None) -> int:
 
     registry = Registry(cfg.get("registry.root", "artefacts"))
     kinds = [kind] if kind else [
-        "probe", "ingest", "diagnostics", "train", "simulate", "evaluate", "backtest", "pack",
+        "probe", "ingest", "diagnostics", "coincidence",
+        "train", "simulate", "evaluate", "backtest", "pack",
     ]
     for k in kinds:
         ids = registry.list_runs(k)

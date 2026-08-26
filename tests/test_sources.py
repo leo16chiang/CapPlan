@@ -474,3 +474,33 @@ def test_coincidence_reports_rather_than_raises_without_lpar_totals(tmp_path, gr
         con.close()
     assert result.frames["coincidence_daily"].empty
     assert not result.headline
+
+
+# -- CLI error handling ----------------------------------------------------
+
+
+def test_expected_failures_become_messages_not_tracebacks(capsys, tmp_path, monkeypatch):
+    """Configuration and environment problems are not bugs. A traceback tells
+    the user nothing they can act on and buries the one line that does."""
+    from capplan.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    code = main(["--config", "does-not-exist.yaml", "diagnostics"])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "ConfigError" in err
+    assert "Traceback" not in err
+
+
+def test_missing_torch_is_explained_with_the_way_forward(capsys, monkeypatch):
+    import importlib.util
+
+    from capplan.cli import main
+
+    if importlib.util.find_spec("torch") is not None:
+        pytest.skip("torch is installed in this environment")
+    code = main(["--set", "model.backend=neuralforecast", "evaluate", "--folds", "1"])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "NeuralUnavailable" in err
+    assert "quantile_ridge" in err, "the message must name the working alternative"

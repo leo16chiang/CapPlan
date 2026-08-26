@@ -36,11 +36,13 @@ This matters for three reasons:
    cost, matching this definition is the only correct answer, and any "peak"
    that is not an R4HA is answering a different question.
 2. **Four-hour averaging smooths the timing differences that make peaks fail to
-   sum.** So the coincidence factor for R4HA sits meaningfully closer to 1 than
-   for interval peaks. Measured on the synthetic hourly panel: 0.794 for the
-   interval peak, 0.854 for R4HA. The whole Stage 2 dependence apparatus earns
-   substantially less on an MLC deliverable than on a hardware one. That is a
-   result worth having before spending a quarter on it.
+   sum.** Two applications peaking two hours apart contribute to the same
+   4-hour window, so the R4HA coincidence factor is necessarily closer to 1
+   than the interval-peak one -- it is an arithmetic consequence of averaging,
+   not an empirical claim. How much closer is site-specific, and every
+   `capplan simulate` run reports both. If the gap is small at your site, the
+   Stage 2 dependence apparatus earns much less on an MLC deliverable than on
+   a hardware one, which is worth knowing before spending a quarter on it.
 3. **Your hourly data computes it well.** A 4-hour rolling mean of hourly MSU is
    a close approximation of the true 5-minute-stepped R4HA — closer than an
    hourly interval peak is to a true interval peak, because averaging is

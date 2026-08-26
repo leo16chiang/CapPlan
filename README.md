@@ -8,8 +8,9 @@ Two things make this harder than it looks:
 1. **A peak is a maximum.** Data are thin, the tail is heavy, and mean-based
    losses are biased for a maximum.
 2. **Peaks do not sum.** Applications peak in different intervals, so adding up
-   application peaks overstates the LPAR. On the synthetic panel shipped here
-   the overstatement is **33%**; measure your own before doing anything else.
+   application peaks overstates the LPAR. How much is a property of your
+   workload, not a constant -- `capplan diagnostics` measures it, and it is the
+   first thing to run.
 
 The answer to both is the same: **the model never forecasts a peak.**
 
@@ -30,6 +31,20 @@ draw residuals -> add to marginals -> SUM ACROSS APPS -> take the maximum
 
 Taking the maximum before the sum gives the sum of app peaks, which is the 33%
 error. It is one transposition away, which is why the sum is a named step.
+
+## A note on the numbers in this repository
+
+The synthetic generator (`capplan/data/synth.py`) exists so the pipeline is
+runnable and testable before your extract lands. It is a **test fixture, not
+evidence**. It can show that the machinery computes what it claims -- that the
+reduction takes a peak of a sum rather than a sum of peaks, that the memory
+ceiling holds, that a transferred coincidence factor is applied correctly. It
+can say nothing whatsoever about your workload, because its properties are
+ones I chose.
+
+Every number that matters -- the coincidence factor, the growth rates, whether
+a neural model beats the baselines, how far apart the reduction conventions sit
+-- has to come from your data. The commands below are how you get them.
 
 ## Start here
 
@@ -104,10 +119,11 @@ capplan/
 
 **The reducer is pluggable, because the question is not settled.** Nobody has
 pinned down whether the fiscal-year figure is a single annual maximum, the mean
-of monthly peaks, or a percentile of daily peaks. On the synthetic panel those
-differ by 21% -- more than the modelling uncertainty. So it is written as
+of monthly peaks, a percentile of daily peaks, or -- for software cost -- the
+monthly peak rolling 4-hour average IBM actually bills on. These are different
+numbers answering different questions. So the reduction is written as
 `reduce(path) -> scalar` (`capplan/sim/reducers.py`) and the architecture stops
-caring. `capplan reducers` lists the conventions.
+caring. `capplan reducers` groups them by the decision they serve.
 
 **Memory is an architectural constraint, not a tuning problem.** Materialising
 paths x days x intervals x apps is 736 GB at the target settings. Paths are
@@ -136,9 +152,8 @@ intervals, fiscal year November-October, top 30-40 applications.
 
 **Out:** off-prime, non-production, cost. DR / IST / GCC SDF are out as forecast
 *targets* but are labelled when they land in prime time, excluded from training
-and from the residual pool, and reported -- on the synthetic panel they add 59%
-to the realised annual maximum, which is out of scope to forecast and still
-something the hardware has to survive.
+and from the residual pool, and reported separately -- out of scope to
+forecast, and still something the hardware has to survive.
 
 Capture ratio and MIPS-per-MSU are **applied as given**. CapPlan does not
 estimate them; it records which value was used on every row so a disputed number
@@ -154,6 +169,10 @@ argument for the neural backend changes with it.
 
 ## Documentation
 
+- **`docs/runbook.md` -- start to finish: ingest, baselines, neural model,
+  comparison, backtest, pack. Start here.**
+- `docs/grain_decision.md` -- hourly vs daily, and the fallback if the hourly
+  spine does not work out
 - `docs/data_input.md` -- getting your SMF data in, from Db2 or a file drop
 - `docs/peak_vs_average.md` -- which number you actually want, and why R4HA is
   not a choice

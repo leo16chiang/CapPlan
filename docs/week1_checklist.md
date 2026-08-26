@@ -82,8 +82,9 @@ Each of these changes the answer more than any modelling choice, and none of
 them is a modelling question:
 
 - **Which decision is the number for?** Hardware sizing and MLC cost are
-  different questions with different right answers -- on the synthetic hourly
-  panel they differ by 42%. `capplan reducers` groups the options by decision.
+  different questions with different right answers, and the gap between them is
+  usually larger than any modelling choice. `capplan reducers` groups the
+  options by decision.
   For software cost the answer is not a choice: IBM bills on the monthly peak
   rolling 4-hour average, so `monthly_peak_r4ha` is the definition to match.
   See `docs/peak_vs_average.md`.

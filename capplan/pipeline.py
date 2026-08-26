@@ -294,6 +294,57 @@ def stage_diagnostics(cfg: Config) -> Run:
     return run
 
 
+def stage_coincidence(cfg: Config, sample_days: int | None = None) -> Run:
+    """Estimate the coincidence factor from sub-daily data and store it.
+
+    Needed only when the forecast will run at daily grain. At sub-daily grain
+    the coincidence is in the data and the simulation measures it directly.
+    """
+    from capplan.sim.coincidence_factor import estimate_from_intervals, save
+
+    grid = grid_from_config(cfg)
+    intervals = read_intervals()
+    run = _registry(cfg).new_run("coincidence", config=cfg)
+
+    if sample_days:
+        keep = sorted(intervals["business_date"].unique())[-sample_days:]
+        intervals = intervals[intervals["business_date"].isin(set(keep))]
+
+    try:
+        lpar_totals = read_table("lpar_totals")
+    except FileNotFoundError:
+        lpar_totals = None
+        LOG.warning(
+            "no lpar_totals: the factor's numerator will be the reconstructed sum of "
+            "scoped applications rather than the realised LPAR peak, so work not "
+            "attributed to any scoped application is invisible to it."
+        )
+
+    factor = estimate_from_intervals(intervals, grid, lpar_totals=lpar_totals)
+    adequacy = factor.sample_adequacy()
+
+    save(factor, run.path("coincidence_factor.npz"))
+    run.add_artefact(run.dir / "coincidence_factor.npz", role="coincidence_factor")
+    run.record_metrics({**factor.summary(), **{k: v for k, v in adequacy.items() if k != "verdict"}})
+    run.record("verdict", adequacy["verdict"])
+    run.write_json("coincidence.json", {**factor.summary(), **adequacy})
+    run.finalise()
+    LOG.info("%s", adequacy["verdict"])
+    return run
+
+
+def load_coincidence_factor(cfg: Config, run_id: str | None = None):
+    """Latest stored factor, or None if none has been estimated."""
+    from capplan.sim.coincidence_factor import load as load_factor
+
+    try:
+        source = _registry(cfg).resolve("coincidence", run_id)
+    except FileNotFoundError:
+        return None
+    path = source.dir / "coincidence_factor.npz"
+    return load_factor(path) if path.exists() else None
+
+
 def stage_train(cfg: Config, calibrate: bool = True) -> Run:
     """Fit Stage 1 and, by default, learn the conformal adjustment."""
     grid = grid_from_config(cfg)
@@ -389,6 +440,15 @@ def stage_simulate(
         run.record_metrics({f"calibration.{k}": v for k, v in metrics.items()})
 
     sampler = build_sampler(cfg, panel)
+    # A daily-grain forecast has a degenerate interval axis, so "peak of the
+    # sum" collapses to "sum of application peaks" unless a factor measured on
+    # sub-daily data is applied.
+    factor = load_coincidence_factor(cfg) if grid.intervals_per_day == 1 else None
+    if grid.intervals_per_day == 1 and factor is None:
+        LOG.warning(
+            "daily grain with no stored coincidence factor. Run `capplan coincidence` "
+            "against sub-daily data first, or read the result as an upper bound."
+        )
     result = simulate(
         forecast,
         sampler,
@@ -399,6 +459,7 @@ def stage_simulate(
         seed=int(cfg.get("simulation.seed")),
         dependence=cfg.get("simulation.dependence"),
         r4ha_hours=float(cfg.get("simulation.r4ha_hours", 4.0)),
+        coincidence_factor=factor,
     )
     run.record_metrics(result.diagnostics)
     result.save(run.path("simulation.npz"))
