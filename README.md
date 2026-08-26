@@ -45,8 +45,9 @@ With your own data, from Db2 (see `docs/data_input.md`):
 
 ```bash
 pip install -e '.[db2]'
-export CAPPLAN_DB2_HOST=... CAPPLAN_DB2_DATABASE=... CAPPLAN_DB2_USER=... CAPPLAN_DB2_PASSWORD=...
+cp .env.example .env && $EDITOR .env               # credentials; git-ignored
 capplan sources                                    # driver? env vars?
+capplan tables                                     # which table may feed what
 # edit config/sources.yaml -- the table names are guesses
 capplan probe  --source db2 --from 2025-06-01 --to 2025-06-07
 capplan ingest --source db2 --from 2022-11-01 --to 2025-10-31
@@ -154,6 +155,8 @@ argument for the neural backend changes with it.
 ## Documentation
 
 - `docs/data_input.md` -- getting your SMF data in, from Db2 or a file drop
+- `docs/peak_vs_average.md` -- which number you actually want, and why R4HA is
+  not a choice
 - `docs/week1_checklist.md` -- what to confirm before writing more code
 - `docs/architecture.md` -- why each stage is shaped the way it is
 - `docs/defects_found.md` -- bugs this codebase caught by measuring its own output (ten of them)

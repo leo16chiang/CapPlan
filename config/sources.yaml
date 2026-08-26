@@ -1,163 +1,241 @@
-# Where CapPlan's four tables come from.
+# Where CapPlan's tables come from.
 #
-# This file is IN VERSION CONTROL. It holds table names, column names and SQL.
-# It holds NO credentials -- those come from the environment, see
-# capplan/data/sources/db2.py.
+# IN VERSION CONTROL. Table names, column names and SQL only -- credentials
+# live in .env (git-ignored; copy .env.example).
 #
-# The queries below are TEMPLATES. Every table and column name is a guess at
-# what your SMF warehouse calls things, and none of them will be right. Edit
-# them; the contract is only that each query returns the aliased column names
-# CapPlan expects (`AS ts`, `AS app_id`, ...). Run `capplan probe` after each
-# edit -- it samples a few hundred rows and tells you what came back.
+# These queries are TEMPLATES built around the IZPCA / TDSz performance
+# database. Column names are guesses; confirm every one against your own Db2
+# catalogue and re-run `capplan probe` after each edit.
 #
 # Two parameter markers per query, in this order:
 #     ?  window start (inclusive)
 #     ?  window end   (exclusive)
-# CapPlan passes datetime.date objects and lets the driver bind them. Do not
-# format dates into the SQL yourself.
+# CapPlan binds datetime.date objects. Never format dates into the SQL.
+#
+# Run `capplan tables` for the catalogue: which table is the spine, which are
+# drivers, and which must never be added to MIPS.
 
 default_source: db2
 
 db2:
-  # A month per round trip. Lower it if the gateway times out on long queries;
-  # raise it if per-query overhead dominates.
   chunk_days: 30
   fetch_batch_rows: 50000
 
+  # Declared so the double-counting guard can check the configuration. See
+  # capplan/data/tables.py -- exactly one SPINE, and only a SPINE may feed
+  # `intervals`.
+  table_roles:
+    intervals: MVSPM_WORKLOAD2_HV
+    lpar_totals: MVSPM_WORKLOAD2_HV
+    validation_mips: CAP_GRP_MIPS_D
+
   queries:
 
-    # ---------------------------------------------------------------------
-    # intervals -- SMF 72 subtype 3 (Workload Activity)
+    # =====================================================================
+    # intervals -- THE SPINE
     #
-    # One row per (application, LPAR, interval). "Application" is whatever your
-    # site maps to: service class, report class, or a lookup table keyed on
-    # them. That mapping is a decision, not a detail -- if two applications
-    # share a service class, CapPlan cannot tell them apart and the custodian
-    # interview will go badly.
+    # MVSPM_WORKLOAD2_HV: SMF 72-3 workload activity, hourly, by service class
+    # and report class.
     #
-    # Return `msu` OR `mips`; normalisation derives the other from the
-    # capture ratio and MIPS-per-MSU in config/capplan.yaml. If your warehouse
-    # stores CPU seconds instead, convert here: an interval's MSU is roughly
-    #     cpu_seconds / interval_seconds * msu_per_engine
-    # but use your site's own conversion -- CapPlan applies what it is given
-    # and does not second-guess it.
+    # This is the only table in your list that can carry the forecast, for two
+    # reasons nothing else has:
     #
-    # The prime-time predicate is in SQL on purpose: prime time is ~21% of the
-    # week, so filtering here means the network carries a fifth of the rows.
-    # `capplan ingest` re-applies the filter itself, so an over-broad query is
-    # correct but slow, never wrong.
-    # ---------------------------------------------------------------------
+    #   * COMPLETE AND NON-OVERLAPPING. WLM classifies every unit of
+    #     dispatchable work exactly once. The CICS, IMS, WAS and job tables are
+    #     different *views* of CPU that is already counted here -- a CICS
+    #     transaction's CPU is in the CICS region's service class, and in the
+    #     region's address space in SMF 30. Adding them together roughly
+    #     doubles the answer, and the result looks plausible rather than wrong.
+    #
+    #   * INTRA-DAY TIMING. The coincidence factor is defined by *when within
+    #     the day* each application peaks. A daily table gives one number per
+    #     application per day; even a daily maximum does not say which hour it
+    #     landed in, so two daily maxima cannot be told apart from two
+    #     simultaneous ones. Coincidence is not hard to measure from daily
+    #     data -- it is absent from it.
+    #
+    # GRAIN. TDSz's aggregation interval is set in the MVSPM_TIME_RES lookup
+    # table, defaults to one hour, and cannot be finer than the SMF interval
+    # feeding it. Check yours:
+    #     SELECT * FROM <schema>.MVSPM_TIME_RES;
+    # At one hour, prime time is 9 intervals a day, not 36. Set
+    # calendar.interval_minutes to match; `capplan probe` will tell you if it
+    # does not.
+    #
+    # BOTTOM-UP APP CODE. You have an app code column, so use it directly
+    # rather than joining a report-class mapping. Two applications sharing one
+    # app code cannot be separated by anything downstream.
+    # =====================================================================
     intervals: |
       SELECT
-          W.SMF_INTERVAL_START           AS ts,
-          W.LPAR_NAME                    AS lpar,
-          COALESCE(M.APPLICATION_ID, W.REPORT_CLASS) AS app_id,
-          W.ENVIRONMENT                  AS environment,
-          W.MSU_CONSUMED                 AS msu,
-          W.CPU_MODEL                    AS cpu_model
-      FROM SMF.WORKLOAD_72_3 W
-      LEFT JOIN SMF.APP_MAPPING M
-             ON M.REPORT_CLASS = W.REPORT_CLASS
-            AND M.LPAR_NAME    = W.LPAR_NAME
-      WHERE W.SMF_INTERVAL_START >= ?
-        AND W.SMF_INTERVAL_START <  ?
-        AND W.ENVIRONMENT = 'PROD'
-        AND HOUR(W.SMF_INTERVAL_START) >= 8
-        AND HOUR(W.SMF_INTERVAL_START) <  17
-        AND DAYOFWEEK_ISO(W.SMF_INTERVAL_START) <= 5
+          W.DATE + W.TIME                AS ts,
+          W.MVS_SYSTEM_ID                AS lpar,
+          W.APPL_CODE                    AS app_id,
+          SUM(W.MSU_USED)                AS msu,
+          SUM(W.CPU_SECONDS)             AS cpu_seconds
+      FROM SMFDB.MVSPM_WORKLOAD2_HV W
+      WHERE W.DATE >= ?
+        AND W.DATE <  ?
+        AND W.APPL_CODE IS NOT NULL
+      GROUP BY W.DATE + W.TIME, W.MVS_SYSTEM_ID, W.APPL_CODE
 
-    # ---------------------------------------------------------------------
-    # lpar_totals -- SMF 70 subtype 1 (RMF CPU Activity)
+    # =====================================================================
+    # lpar_totals -- the backtest ground truth
     #
-    # READ THIS BEFORE EDITING.
+    # The realised LPAR peak, measured at the LPAR. Ideally SMF 70-1 (RMF CPU
+    # activity, partition level). If you have no 70-1 table, the least-bad
+    # substitute is this same spine aggregated WITHOUT the app-code grouping,
+    # which is what the query below does.
     #
-    # This MUST come from SMF 70-1, measured at the LPAR. It must NOT be
-    # derived by summing the `intervals` rows above.
-    #
-    # The whole evaluation strategy is: simulate the LPAR peak from
-    # application-level data, then check it against what the LPAR actually did.
-    # If the "actual" is itself a sum of application rows, the backtest
-    # compares the simulation against its own assumption and passes no matter
-    # how wrong the coincidence model is. That failure stays invisible until a
-    # hardware configuration has been signed.
-    #
-    # A daily aggregate is enough: the peak interval, when it happened, and the
-    # daily mean. The same prime-time predicate applies.
-    # ---------------------------------------------------------------------
+    # BE CLEAR ABOUT WHAT THAT COSTS. Deriving lpar_totals from the same rows
+    # as `intervals` makes the simulation backtest weaker: it still tests
+    # whether the coincidence structure was reconstructed correctly (the peak
+    # of the ungrouped sum is a genuinely different quantity from the sum of
+    # per-app peaks), but it no longer tests whether the app-level attribution
+    # captures all LPAR work. Unattributed load becomes invisible. Getting a
+    # real 70-1 table remains the single most valuable data dependency here.
+    # =====================================================================
     lpar_totals: |
       SELECT
-          DATE(P.SMF_INTERVAL_START)     AS business_date,
-          P.LPAR_NAME                    AS lpar,
-          MAX(P.MIPS_USED)               AS peak_mips,
-          AVG(P.MIPS_USED)               AS mean_mips,
-          (MAX(P.MIPS_USED * 1000 + P.INTERVAL_INDEX)
-             - MAX(P.MIPS_USED) * 1000)  AS peak_interval_idx
-      FROM SMF.PARTITION_70_1 P
-      WHERE P.SMF_INTERVAL_START >= ?
-        AND P.SMF_INTERVAL_START <  ?
-        AND P.ENVIRONMENT = 'PROD'
-        AND HOUR(P.SMF_INTERVAL_START) >= 8
-        AND HOUR(P.SMF_INTERVAL_START) <  17
-        AND DAYOFWEEK_ISO(P.SMF_INTERVAL_START) <= 5
-      GROUP BY DATE(P.SMF_INTERVAL_START), P.LPAR_NAME
+          W.DATE                         AS business_date,
+          W.MVS_SYSTEM_ID                AS lpar,
+          MAX(W.HOURLY_TOTAL)            AS peak_mips,
+          AVG(W.HOURLY_TOTAL)            AS mean_mips
+      FROM (
+          SELECT
+              W2.DATE, W2.TIME, W2.MVS_SYSTEM_ID,
+              SUM(W2.MSU_USED) AS HOURLY_TOTAL
+          FROM SMFDB.MVSPM_WORKLOAD2_HV W2
+          WHERE W2.DATE >= ? AND W2.DATE < ?
+          GROUP BY W2.DATE, W2.TIME, W2.MVS_SYSTEM_ID
+      ) W
+      GROUP BY W.DATE, W.MVS_SYSTEM_ID
 
-    # ---------------------------------------------------------------------
-    # events -- DR / IST / GCC SDF windows, from the change calendar.
+    # =====================================================================
+    # drivers -- volume, NOT MIPS
     #
-    # Out of scope as forecast TARGETS, but they land in prime time and have to
-    # be labelled. Unlabelled, Stage 1 fits them as ordinary variation and
-    # Stage 2 resamples the DR day as if it were a normal Tuesday -- one
-    # historical DR exercise becomes a recurring feature of the forward
-    # distribution.
+    # These are loaded to the `drivers` table, never to `intervals`. Two uses:
     #
-    # `lpar` and `app_id` accept '*' as a wildcard for site-wide events.
-    # If there is no change-calendar table, delete this query: the robust-z
-    # spike detector will flag candidates for a human to confirm, which is
-    # worse but not nothing.
-    # ---------------------------------------------------------------------
-    events: |
-      SELECT
-          C.CHANGE_ID                    AS event_id,
-          C.EVENT_TYPE                   AS event_type,
-          COALESCE(C.LPAR_NAME, '*')     AS lpar,
-          COALESCE(C.APPLICATION_ID, '*') AS app_id,
-          C.WINDOW_START                 AS start_ts,
-          C.WINDOW_END                   AS end_ts,
-          C.DESCRIPTION                  AS note
-      FROM CHANGE.CALENDAR C
-      WHERE C.WINDOW_END   >= ?
-        AND C.WINDOW_START <  ?
-        AND C.EVENT_TYPE IN ('DR', 'IST', 'GCC_SDF')
+    #   1. ATTRIBUTION. Splitting a service class across the app codes sharing
+    #      it, when the spine's app code is coarser than you need.
+    #   2. LEADING INDICATORS. Transaction volume growth precedes MIPS growth,
+    #      and a custodian can forecast transaction counts with far more
+    #      confidence than MIPS. "Your CICS volume is growing 8% a year and
+    #      your MIPS 6%" is a far better interview opener than a MIPS number
+    #      on its own.
+    #
+    # Uncomment the ones you have. The ingest path refuses to add them to MIPS.
+    # =====================================================================
 
-    # ---------------------------------------------------------------------
-    # submissions -- what custodians forecast in previous cycles.
-    #
-    # Powers the per-app bias score, which is both the honest benchmark and the
-    # opening of every custodian interview. `fiscal_year` is the year the
-    # submission is ABOUT, not the year it was made.
-    # ---------------------------------------------------------------------
-    submissions: |
-      SELECT
-          S.APPLICATION_ID               AS app_id,
-          S.TARGET_FISCAL_YEAR           AS fiscal_year,
-          S.SUBMITTED_ON                 AS submitted_on,
-          S.PEAK_MIPS_FORECAST           AS submitted_peak_mips,
-          S.BASIS                        AS basis
-      FROM CAPACITY.SUBMISSIONS S
-      WHERE S.SUBMITTED_ON >= ?
-        AND S.SUBMITTED_ON <  ?
+    # CICS transaction volume -- SMF 110-1, daily.
+    # drivers_cics: |
+    #   SELECT
+    #       C.DATE                       AS business_date,
+    #       C.APPL_CODE                  AS app_id,
+    #       'CICS_TRANS'                 AS driver_name,
+    #       SUM(C.TRANS_COUNT)           AS driver_value
+    #   FROM SMFDB.CICS_TRANSACTIO_DP C
+    #   WHERE C.DATE >= ? AND C.DATE < ?
+    #   GROUP BY C.DATE, C.APPL_CODE
 
-  # Fallback renaming, for when you cannot change the SQL (a view you do not
-  # own, a DBA who will not add aliases). Applied after column names are
-  # lower-cased. Prefer aliasing in the query.
+    # IMS transaction volume -- daily.
+    # drivers_ims: |
+    #   SELECT
+    #       I.DATE                       AS business_date,
+    #       I.APPL_CODE                  AS app_id,
+    #       'IMS_TRANS'                  AS driver_name,
+    #       SUM(I.TRAN_COUNT)            AS driver_value
+    #   FROM SMFDB.IMS_SYSTEM_TRAN2_D I
+    #   WHERE I.DATE >= ? AND I.DATE < ?
+    #   GROUP BY I.DATE, I.APPL_CODE
+
+    # WAS servlet volume -- HOURLY, so unlike the others this one carries
+    # intra-day timing and can validate the spine's intra-day shape for WAS
+    # work independently. If servlet volume peaks at 10:00 and the spine says
+    # the WAS service class peaks at 14:00, one of the two attributions is
+    # wrong and it is worth knowing which before the pack goes out.
+    # drivers_was: |
+    #   SELECT
+    #       S.DATE + S.TIME              AS ts,
+    #       S.APPL_CODE                  AS app_id,
+    #       'WAS_SERVLET_REQ'            AS driver_name,
+    #       SUM(S.REQUEST_COUNT)         AS driver_value
+    #   FROM SMFDB.WAS_INT_SERVLETS_H S
+    #   WHERE S.DATE >= ? AND S.DATE < ?
+    #   GROUP BY S.DATE + S.TIME, S.APPL_CODE
+
+    # Batch job volume -- daily. Batch is the workload most likely to move
+    # wholesale (a migrated or rescheduled job stream is a step change, not a
+    # trend), so this is where scenario overrides usually come from.
+    # NOTE: batch frequently peaks OUTSIDE prime time. If the deliverable is an
+    # R4HA figure, a prime-time-only scope will miss the daily peak entirely --
+    # see docs/peak_vs_average.md.
+    # drivers_jobs: |
+    #   SELECT
+    #       J.DATE                       AS business_date,
+    #       J.APPL_CODE                  AS app_id,
+    #       'BATCH_JOBS'                 AS driver_name,
+    #       SUM(J.JOB_COUNT)             AS driver_value
+    #   FROM SMFDB.KPMZ_JOB_INT_D J
+    #   WHERE J.DATE >= ? AND J.DATE < ?
+    #   GROUP BY J.DATE, J.APPL_CODE
+
+    # =====================================================================
+    # validation -- compared against, never fed in
+    #
+    # CAP_GRP_MIPS_D is your existing application MIPS table. Deliberately not
+    # an input: if CapPlan's independently derived application MIPS agree with
+    # it, that agreement is evidence. Feeding it in would make the agreement
+    # circular. It is also the number custodians have already seen, so any
+    # disagreement is a conversation to have before the pack goes out.
+    #
+    # Check first whether its MIPS use the same capture ratio and MIPS-per-MSU
+    # table CapPlan is configured with; if not, the comparison needs a stated
+    # conversion rather than a shrug.
+    # =====================================================================
+    # validation_mips: |
+    #   SELECT
+    #       G.DATE                       AS business_date,
+    #       G.APPL_CODE                  AS app_id,
+    #       G.MIPS                       AS reported_mips
+    #   FROM SMFDB.CAP_GRP_MIPS_D G
+    #   WHERE G.DATE >= ? AND G.DATE < ?
+
+    # =====================================================================
+    # events -- DR / IST / GCC SDF windows from the change calendar.
+    # =====================================================================
+    # events: |
+    #   SELECT
+    #       C.CHANGE_ID                  AS event_id,
+    #       C.EVENT_TYPE                 AS event_type,
+    #       COALESCE(C.LPAR_NAME, '*')   AS lpar,
+    #       COALESCE(C.APPL_CODE, '*')   AS app_id,
+    #       C.WINDOW_START               AS start_ts,
+    #       C.WINDOW_END                 AS end_ts,
+    #       C.DESCRIPTION                AS note
+    #   FROM CHANGE.CALENDAR C
+    #   WHERE C.WINDOW_END >= ? AND C.WINDOW_START < ?
+    #     AND C.EVENT_TYPE IN ('DR', 'IST', 'GCC_SDF')
+
+    # =====================================================================
+    # submissions -- previous custodian forecasts.
+    # =====================================================================
+    # submissions: |
+    #   SELECT
+    #       S.APPL_CODE                  AS app_id,
+    #       S.TARGET_FISCAL_YEAR         AS fiscal_year,
+    #       S.SUBMITTED_ON               AS submitted_on,
+    #       S.PEAK_MIPS_FORECAST         AS submitted_peak_mips,
+    #       S.BASIS                      AS basis
+    #   FROM CAPACITY.SUBMISSIONS S
+    #   WHERE S.SUBMITTED_ON >= ? AND S.SUBMITTED_ON < ?
+
+  # Fallback renaming when the SQL cannot be changed. Keys lower-case: Db2
+  # folds unquoted identifiers to upper case and CapPlan lower-cases them all.
   column_map:
     intervals: {}
     lpar_totals: {}
-    events: {}
-    submissions: {}
 
-# Landing-directory source: one file or glob per table, columns already named
-# as CapPlan expects. For when someone else runs the extract on a schedule.
 files:
   root: data_drop
   column_map: {}

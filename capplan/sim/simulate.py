@@ -43,7 +43,13 @@ from capplan.config import Config
 from capplan.data.calendar import PrimeTimeGrid
 from capplan.logging_utils import get_logger
 from capplan.model.forecast import ForecastCube
-from capplan.sim.reducers import PathSummary, _Reducer, get_reducer, reduce_by_fiscal_year
+from capplan.sim.reducers import (
+    PathSummary,
+    _Reducer,
+    get_reducer,
+    needs_r4ha,
+    reduce_by_fiscal_year,
+)
 
 LOG = get_logger(__name__)
 
@@ -61,6 +67,9 @@ class SimulationResult:
     fiscal_years: np.ndarray         # (days,)
     dependence: str
     n_paths: int
+    daily_r4ha: np.ndarray | None = None          # (paths, days) peak R4HA of the SUM
+    daily_sum_app_r4ha: np.ndarray | None = None  # (paths, days) SUM of per-app peak R4HA
+    r4ha_window_intervals: int = 0
     reducer_values: dict[str, np.ndarray] = field(default_factory=dict)
     reducer_by_fy: dict[str, dict[int, np.ndarray]] = field(default_factory=dict)
     diagnostics: dict[str, float] = field(default_factory=dict)
@@ -80,6 +89,33 @@ class SimulationResult:
                 row[f"p{int(100 * q)}"] = float(np.quantile(values, q))
             rows.append(row)
         return pd.DataFrame(rows)
+
+    def coincidence_by_target(self) -> dict[str, float]:
+        """Coincidence for the interval peak vs for the R4HA.
+
+        The gap is the point. Averaging over four hours smooths out the timing
+        differences that make peaks fail to sum, so the R4HA coincidence factor
+        sits much closer to 1. Concretely: the Stage 2 dependence machinery is
+        worth a lot on a hardware-sizing deliverable and much less on an MLC
+        cost one, and this number says how much.
+        """
+        out = {}
+        interval_ratio = self.daily_peaks / np.maximum(self.daily_sum_app_peaks, 1e-9)
+        out["coincidence_interval_peak"] = float(interval_ratio.mean())
+        if self.daily_r4ha is not None and self.daily_sum_app_r4ha is not None:
+            # Like for like: the R4HA of the sum over the sum of each
+            # application's OWN R4HA. Dividing by the sum of interval peaks
+            # instead would fold the smoothing effect into the coincidence
+            # figure and read far worse than reality.
+            r4ha_ratio = self.daily_r4ha / np.maximum(self.daily_sum_app_r4ha, 1e-9)
+            out["coincidence_r4ha"] = float(r4ha_ratio.mean())
+            out["r4ha_to_interval_peak_ratio"] = float(
+                (self.daily_r4ha / np.maximum(self.daily_peaks, 1e-9)).mean()
+            )
+            out["coincidence_gain_from_r4ha"] = (
+                out["coincidence_r4ha"] - out["coincidence_interval_peak"]
+            )
+        return out
 
     def coincidence(self) -> dict[str, float]:
         """Simulated coincidence factor, comparable with the historical SQL.
@@ -122,6 +158,14 @@ class SimulationResult:
             daily_means=self.daily_means,
             daily_sum_app_peaks=self.daily_sum_app_peaks,
             app_peaks=self.app_peaks,
+            daily_r4ha=(
+                self.daily_r4ha if self.daily_r4ha is not None else np.zeros(0, dtype=np.float32)
+            ),
+            daily_sum_app_r4ha=(
+                self.daily_sum_app_r4ha
+                if self.daily_sum_app_r4ha is not None
+                else np.zeros(0, dtype=np.float32)
+            ),
             days=np.array([d.isoformat() for d in self.days], dtype=object),
             apps=np.array(self.apps, dtype=object),
             fiscal_years=self.fiscal_years,
@@ -141,6 +185,7 @@ def simulate(
     seed: int = 20260101,
     residual_scaling: str = "spread",
     dependence: str = "block_bootstrap",
+    r4ha_hours: float = 4.0,
     progress_every: int = 5,
 ) -> SimulationResult:
     """Sample paths from the joint model and reduce them.
@@ -162,6 +207,22 @@ def simulate(
     reducer_objs = [get_reducer(name) for name in reducers]
     retain_intervals = any(r.needs_intervals for r in reducer_objs)
 
+    # The rolling 4-hour average is accumulated inside the loop with a ring
+    # buffer, never reconstructed afterwards -- reconstructing it would need
+    # the interval series the memory contract exists to avoid. The buffer is
+    # (chunk, window) floats, which is kilobytes.
+    want_r4ha = needs_r4ha(reducers)
+    interval_minutes = 1440 // n_int if n_int else 60
+    r4ha_window = max(1, int(round(r4ha_hours * 60 / _interval_minutes(grid))))
+    if want_r4ha and r4ha_window > n_int:
+        LOG.warning(
+            "a %.0f-hour window is %d intervals but the prime-time day is only %d. "
+            "The rolling average will span the overnight gap, which is correct for "
+            "MLC (IBM's window does not stop at 17:00) but means the figure depends "
+            "on off-prime load this scope excludes -- see docs/peak_vs_average.md.",
+            r4ha_hours, r4ha_window, n_int,
+        )
+
     daily_peaks = np.empty((n_paths, n_days), dtype=np.float32)
     daily_means = np.empty((n_paths, n_days), dtype=np.float32)
     # Retained so the simulation can report its own coincidence factor against
@@ -169,6 +230,12 @@ def simulate(
     # useful validation number the run produces.
     daily_sum_app_peaks = np.empty((n_paths, n_days), dtype=np.float32)
     app_peaks = np.zeros((n_paths, n_apps), dtype=np.float32)
+    daily_r4ha = np.empty((n_paths, n_days), dtype=np.float32) if want_r4ha else None
+    # Per-app R4HA, so the R4HA coincidence factor is measured like for like.
+    # Dividing the R4HA of the sum by the sum of app *interval* peaks conflates
+    # two different effects -- smoothing and coincidence -- and reads as a much
+    # worse coincidence factor than reality.
+    daily_sum_app_r4ha = np.empty((n_paths, n_days), dtype=np.float32) if want_r4ha else None
 
     rng = np.random.default_rng(seed)
     n_chunks = int(np.ceil(n_paths / path_chunk))
@@ -182,6 +249,17 @@ def simulate(
         chunk_intervals = (
             np.empty((size, n_days, n_int), dtype=np.float32) if retain_intervals else None
         )
+        # Ring buffer of the last `r4ha_window` interval totals, carried across
+        # day boundaries so a window straddling midnight is handled the way
+        # IBM's actually is.
+        ring = np.zeros((size, r4ha_window), dtype=np.float32) if want_r4ha else None
+        # (size, apps, window): a few hundred KB, and the only way to get a
+        # like-for-like R4HA coincidence factor.
+        app_ring = (
+            np.zeros((size, n_apps, r4ha_window), dtype=np.float32) if want_r4ha else None
+        )
+        ring_pos = 0
+        ring_filled = 0
 
         # Lazy: only the day indices are held for the chunk, and each day's
         # residual slab is produced and discarded inside the loop below.
@@ -206,6 +284,26 @@ def simulate(
             if chunk_intervals is not None:
                 chunk_intervals[:, d, :] = total
 
+            if ring is not None:
+                best = np.zeros(size, dtype=np.float32)
+                best_app = np.zeros((size, n_apps), dtype=np.float32)
+                for i in range(n_int):
+                    ring[:, ring_pos] = total[:, i]
+                    app_ring[:, :, ring_pos] = per_app[:, :, i]
+                    ring_pos = (ring_pos + 1) % r4ha_window
+                    ring_filled = min(ring_filled + 1, r4ha_window)
+                    # Only a full window is a 4-hour average. Before the buffer
+                    # fills -- the first hours of the horizon -- there is no
+                    # honest value, so the day contributes nothing rather than
+                    # a partial average that would read low.
+                    if ring_filled == r4ha_window:
+                        np.maximum(best, ring.mean(axis=1), out=best)
+                        np.maximum(best_app, app_ring.mean(axis=2), out=best_app)
+                daily_r4ha[lo:hi, d] = best
+                # Each application free to have its own worst 4 hours, exactly
+                # as each is free to have its own peak interval.
+                daily_sum_app_r4ha[lo:hi, d] = best_app.sum(axis=1)
+
         app_peaks[lo:hi] = chunk_app_max
         if progress_every and (c + 1) % progress_every == 0:
             LOG.info("simulated %d/%d paths", hi, n_paths)
@@ -216,6 +314,9 @@ def simulate(
         daily_means=daily_means,
         daily_sum_app_peaks=daily_sum_app_peaks,
         app_peaks=app_peaks,
+        daily_r4ha=daily_r4ha,
+        daily_sum_app_r4ha=daily_sum_app_r4ha,
+        r4ha_window_intervals=r4ha_window if want_r4ha else 0,
         days=list(forecast.days),
         apps=list(forecast.apps),
         fiscal_years=fiscal_years,
@@ -231,6 +332,7 @@ def simulate(
         "n_apps": n_apps,
         "n_intervals": n_int,
         "residual_scaling": residual_scaling,
+        "r4ha_window_intervals": r4ha_window if want_r4ha else 0,
         "peak_chunk_working_mb": peak_bytes / 1e6,
         "accumulator_mb": (
             daily_peaks.nbytes
@@ -240,6 +342,7 @@ def simulate(
         )
         / 1e6,
         **result.coincidence(),
+        **result.coincidence_by_target(),
         **getattr(sampler, "diagnostics", dict)(),
     }
     LOG.info(
@@ -252,6 +355,10 @@ def simulate(
         result.diagnostics["simulated_coincidence_daily_mean"],
     )
     return result
+
+
+def _interval_minutes(grid: PrimeTimeGrid) -> int:
+    return grid.interval_minutes
 
 
 def _apply_reducers(
@@ -274,6 +381,7 @@ def _apply_reducers(
                 daily_peaks=result.daily_peaks[p],
                 daily_means=result.daily_means[p],
                 days=result.days,
+                daily_r4ha=None if result.daily_r4ha is None else result.daily_r4ha[p],
                 fiscal_years=result.fiscal_years,
             )
             whole[p] = reducer(path)

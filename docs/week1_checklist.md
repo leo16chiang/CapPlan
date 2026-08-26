@@ -3,22 +3,36 @@
 Everything below is cheap to confirm and expensive to be wrong about. Work
 down the list before writing more modelling code.
 
-## 1. Confirm the SMF interval is 15 minutes
+## 1. Confirm the aggregation interval
 
-**Why it comes first.** Everything downstream assumes it. Fifteen minutes gives
-36 prime-time intervals per business day, and across ~35 applications and ~250
-business days a year that is roughly 950,000 prime-time rows -- which is the
-data volume that justifies a global neural Stage 1 at all. At 30-minute
-intervals it halves; at hourly it is 260,000 and the argument for a neural net
-gets much weaker.
+**Why it comes first.** Everything downstream is indexed on it, and it decides
+whether a neural Stage 1 is justified at all.
+
+For an IZPCA / TDSz performance database, the interval is a configured value,
+not a property of SMF:
 
 ```sql
-SELECT DISTINCT date_diff('minute', LAG(ts) OVER (PARTITION BY app_id ORDER BY ts), ts)
-FROM intervals LIMIT 20;
+SELECT * FROM <schema>.MVSPM_TIME_RES;
 ```
 
-If it is not 15, change `calendar.interval_minutes` in `config/capplan.yaml`.
-Only `capplan/data/calendar.py` cares -- but revisit the backend choice.
+It defaults to one hour and cannot be finer than the SMF interval feeding it.
+
+| Grain | Prime intervals/day | Rows (35 apps x 3 yr) |
+|---|---|---|
+| 15 min | 36 | 945,000 |
+| 30 min | 18 | 472,500 |
+| **60 min (default)** | **9** | **236,250** |
+
+At hourly, the ~950k row count that justified a global neural Stage 1 is a
+quarter of that. Expect `quantile_ridge` or LightGBM to win the baseline gate;
+run `capplan evaluate` and let it decide rather than planning around N-HiTS.
+
+Set `calendar.interval_minutes` to match. `capplan probe` infers the grain from
+a sample and fails loudly if it disagrees with the config.
+
+Also note: an hourly figure is an hourly *average*, so the true peak inside the
+peak hour is higher. Measure that uplift -- see step 5 -- rather than assuming
+it.
 
 ## 2. Confirm torch is on the internal mirror
 
@@ -67,9 +81,19 @@ unbiased, the bar is higher than expected.
 Each of these changes the answer more than any modelling choice, and none of
 them is a modelling question:
 
-- **Which reducer?** Annual max, mean of monthly peaks, or a percentile of daily
-  peaks? On the synthetic panel these span 21%. Run `capplan reducers`, put the
-  list in front of them, get one written down.
+- **Which decision is the number for?** Hardware sizing and MLC cost are
+  different questions with different right answers -- on the synthetic hourly
+  panel they differ by 42%. `capplan reducers` groups the options by decision.
+  For software cost the answer is not a choice: IBM bills on the monthly peak
+  rolling 4-hour average, so `monthly_peak_r4ha` is the definition to match.
+  See `docs/peak_vs_average.md`.
+- **Peak-to-hourly uplift.** If the grain is hourly, measure
+  `max(interval) / max(hourly average)` from one month of RMF interval data and
+  put it in `normalisation.peak_to_hourly_uplift`. It multiplies the headline
+  hardware number, so a reviewer will ask where it came from.
+- **Prime time, for which target?** IBM's 4-hour window does not stop at 17:00,
+  and at many sites the daily peak R4HA is set by the batch window. Prime-time
+  scoping is right for the prime-shift hardware question and wrong for cost.
 - **Prime time.** 08:00-17:00 confirmed? Local to which timezone? Does the
   mainframe clock match?
 - **Fiscal year.** November-October confirmed, and is FY2027 the year *ending*

@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from capplan.logging_utils import get_logger
-from capplan.sim.reducers import REDUCERS
+from capplan.sim.reducers import REDUCERS, TARGET_FAMILY
 from capplan.sim.simulate import SimulationResult
 
 LOG = get_logger(__name__)
@@ -118,15 +118,24 @@ def _overview(
         "",
         _fy_table(result, reducer),
         "",
-        "## The convention matters more than you would like",
+        "## Which number you want depends on which decision you are making",
         "",
         "There is no single 'the peak'. These are the same simulation reduced "
-        "different ways:",
+        "different ways, and the differences between them are larger than the "
+        "modelling uncertainty within any one of them:",
         "",
         _reducer_comparison(result),
         "",
-        "Pick one, write it down, and use the same one next cycle. The spread "
-        "between them is larger than most of the modelling uncertainty.",
+        "The rolling 4-hour average is not a convention chosen here. IBM's "
+        "sub-capacity MLC billing takes the highest 4-hour rolling average MSU "
+        "each day and charges on the highest across the month, so if the "
+        "question is software cost, that is the definition to match rather than "
+        "a candidate to weigh. If the question is hardware sizing, the interval "
+        "peak is the right target -- the machine has to survive the moment, not "
+        "the four hours around it.",
+        "",
+        "If you need both, ask for both. The simulation is identical; only the "
+        "final reduction differs, and running it twice costs nothing.",
         "",
         "## Why the application numbers do not add up to this",
         "",
@@ -134,6 +143,10 @@ def _overview(
         "peaks assumes they all peak simultaneously, which they do not.",
         "",
     ]
+    by_target = {
+        k: result.diagnostics.get(k)
+        for k in ("coincidence_interval_peak", "coincidence_r4ha")
+    }
     coincidence = result.diagnostics.get("simulated_coincidence_daily_mean")
     if coincidence:
         overstatement = 100.0 * (1.0 / coincidence - 1.0)
@@ -143,6 +156,18 @@ def _overview(
             f"**{overstatement:.0f}%**",
             "",
         ]
+        if by_target.get("coincidence_r4ha") and by_target.get("coincidence_interval_peak"):
+            lines += [
+                f"- For the interval peak the factor is "
+                f"**{by_target['coincidence_interval_peak']:.3f}**; for the rolling "
+                f"4-hour average it is **{by_target['coincidence_r4ha']:.3f}**.",
+                "",
+                "  Averaging over four hours smooths out the timing differences that "
+                "stop peaks from summing, so the coincidence correction matters less "
+                "for the MLC cost figure than for the hardware one. Worth knowing "
+                "before deciding how much weight to put on this part of the method.",
+                "",
+            ]
     if coincidence_summary is not None and not coincidence_summary.empty:
         lines += [
             "Measured on history, per LPAR and fiscal year:",
@@ -343,11 +368,20 @@ def _reducer_comparison(result: SimulationResult) -> str:
     if not result.reducer_by_fy:
         return "_No reducers computed._"
     last_fy = max(next(iter(result.reducer_by_fy.values())).keys())
+    labels = {
+        "hardware": "hardware sizing",
+        "software_cost": "software (MLC) cost",
+        "sustained": "trending / chargeback",
+        "duration": "duration",
+    }
     rows = []
-    for name, by_fy in sorted(result.reducer_by_fy.items()):
+    for name, by_fy in sorted(
+        result.reducer_by_fy.items(), key=lambda kv: TARGET_FAMILY.get(kv[0], "")
+    ):
         values = by_fy[last_fy]
         rows.append(
             {
+                "decides": labels.get(TARGET_FAMILY.get(name, ""), "-"),
                 "reducer": name,
                 f"FY{last_fy} median": f"{np.quantile(values, 0.5):,.0f}",
                 f"FY{last_fy} p95": f"{np.quantile(values, 0.95):,.0f}",
@@ -367,15 +401,21 @@ def _md_table(frame: pd.DataFrame) -> str:
         "|" + "|".join(["---"] * len(columns)) + "|",
     ]
     for _, row in frame.iterrows():
-        lines.append("| " + " | ".join(_fmt(row[c]) for c in columns) + " |")
+        lines.append("| " + " | ".join(_fmt(row[c], str(c)) for c in columns) + " |")
     return "\n".join(lines)
 
 
-def _fmt(value) -> str:
+# Columns that are identifiers rather than quantities: no thousands separator,
+# because "FY2,027" is not a fiscal year anyone recognises.
+_IDENTIFIER_COLUMNS = ("year", "idx", "index", "id")
+
+
+def _fmt(value, column: str = "") -> str:
     if isinstance(value, (bool, np.bool_)):
         return "yes" if value else "no"
+    identifier = any(token in column.lower() for token in _IDENTIFIER_COLUMNS)
     if isinstance(value, (int, np.integer)):
-        return f"{int(value):,}"
+        return str(int(value)) if identifier else f"{int(value):,}"
     if isinstance(value, (float, np.floating)):
         if not np.isfinite(value):
             return "-"
@@ -383,6 +423,6 @@ def _fmt(value) -> str:
         # interval index as "9.000" makes the table look like it is reporting a
         # precision it does not have.
         if float(value).is_integer():
-            return f"{int(value):,}"
+            return str(int(value)) if identifier else f"{int(value):,}"
         return f"{value:,.3f}" if abs(value) < 1000 else f"{value:,.0f}"
     return str(value)

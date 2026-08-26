@@ -239,7 +239,9 @@ def test_registry_round_trips_and_verifies(tmp_path, cfg):
     resolved = registry.resolve("train")
     assert resolved.run_id == run.run_id
     assert resolved.manifest["metrics"]["pinball"] == 0.1
-    assert resolved.manifest["config"]["calendar"]["interval_minutes"] == 15
+    assert resolved.manifest["config"]["calendar"]["interval_minutes"] == cfg.get(
+        "calendar.interval_minutes"
+    ), "the manifest must record the grain the run actually used"
     assert registry.verify("train") == []
 
     (run.dir / "thing.json").write_text("tampered", encoding="utf-8")

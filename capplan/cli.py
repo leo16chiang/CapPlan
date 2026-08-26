@@ -2,6 +2,7 @@
 
     capplan check          week-1 environment and dependency check
     capplan sources        list configured data sources
+    capplan tables         IZPCA source-table catalogue: grain and role
     capplan probe          sample a source and check it against our assumptions
     capplan ingest         extract from a source and land it in the lake
     capplan diagnostics    the two pure-SQL checks -- run these first
@@ -29,6 +30,8 @@ from pathlib import Path
 
 from capplan import __version__
 from capplan.config import load_config
+from capplan.envfile import describe as describe_dotenv
+from capplan.envfile import load as load_dotenv
 from capplan.logging_utils import setup_logging
 
 
@@ -36,6 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="capplan", description=__doc__.split("\n")[0])
     parser.add_argument("--config", default=None, help="path to capplan.yaml")
     parser.add_argument("--log-level", default="INFO")
+    parser.add_argument(
+        "--env-file",
+        action="append",
+        default=None,
+        help="extra dotenv file to load (repeatable); .env and .env.local load by default",
+    )
     parser.add_argument("--version", action="version", version=f"capplan {__version__}")
     parser.add_argument(
         "--set",
@@ -67,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sources-config", default="config/sources.yaml")
 
     sub.add_parser("sources", help="list configured data sources")
+    sub.add_parser("tables", help="IZPCA source-table catalogue: grain and role")
 
     sub.add_parser("diagnostics", help="coincidence factor and submission bias (SQL only)")
 
@@ -105,6 +115,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     setup_logging(args.log_level)
+    # Before anything reads os.environ. Real environment variables still win.
+    load_dotenv(tuple(args.env_file) if args.env_file else None or (".env", ".env.local"))
 
     if args.command == "check":
         return _check()
@@ -115,6 +127,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "sources":
         return _sources()
+    if args.command == "tables":
+        from capplan.data.tables import describe_catalogue
+
+        print(describe_catalogue())
+        return 0
 
     cfg = load_config(args.config)
     if args.set:
@@ -206,7 +223,8 @@ def _sources() -> int:
         print(f"  {name}")
     ok, message = pyodbc_available()
     print(f"\ndb2 driver: {'ok' if ok else 'unavailable'} -- {message}")
-    print("\ndb2 credentials come from the environment, never from config/:")
+    print(f"\ndotenv: {describe_dotenv()}")
+    print("\ndb2 credentials come from the environment or .env, never from config/:")
     for suffix in ("DSN", "HOST", "PORT", "DATABASE", "USER", "PASSWORD", "PASSWORD_CMD", "DRIVER"):
         name = f"{ENV_PREFIX}{suffix}"
         state = "set" if os.environ.get(name) else "--"

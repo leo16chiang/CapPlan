@@ -59,6 +59,7 @@ double-count the variance Stage 2 adds.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -229,7 +230,11 @@ def estimate_growth(
     work = cube.astype(float).copy()
     if exclude is not None:
         work[exclude] = np.nan
-    with np.errstate(invalid="ignore"):
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        # An application with an entirely anomalous day has no median for that
+        # day. That is expected and handled by the `ok` mask below, so the
+        # all-NaN-slice warning is noise rather than signal.
+        warnings.simplefilter("ignore", category=RuntimeWarning)
         daily = np.nanmedian(work, axis=2)          # (apps, days)
     years = np.array([(d - days[0]).days / 365.25 for d in days], dtype=float)
 

@@ -220,6 +220,19 @@ def stage_ingest(
         )
 
     sources_cfg = load_sources_config(sources_path) if source_name != "synthetic" else {}
+
+    # Refuse a configuration that would add the same CPU twice. This has to
+    # happen before extraction, not after: every downstream stage would be
+    # arithmetically correct on top of a double-counted base, so nothing later
+    # would look wrong.
+    roles = (sources_cfg.get(source_name) or {}).get("table_roles")
+    if roles:
+        from capplan.data.tables import validate_roles
+
+        for warning in validate_roles(roles):
+            LOG.warning("table roles: %s", warning)
+            run.manifest.setdefault("record", {}).setdefault("role_warnings", []).append(warning)
+
     source = build_source(cfg, source_name, sources_cfg, seed=seed)
     frames, extract = extract_to_frames(
         source, ("intervals", "lpar_totals", "events", "submissions"), start, end
@@ -385,6 +398,7 @@ def stage_simulate(
         reducers=reducers,
         seed=int(cfg.get("simulation.seed")),
         dependence=cfg.get("simulation.dependence"),
+        r4ha_hours=float(cfg.get("simulation.r4ha_hours", 4.0)),
     )
     run.record_metrics(result.diagnostics)
     result.save(run.path("simulation.npz"))
@@ -522,12 +536,25 @@ def _load_simulation(path: Path, grid):
     from capplan.sim.reducers import PathSummary, get_reducer, reduce_by_fiscal_year
     from capplan.sim.simulate import SimulationResult
 
+    def _optional(data, key):
+        """A zero-length array is the on-disk sentinel for 'not accumulated'.
+
+        Restoring it as an empty array instead of None would make the R4HA
+        reducers fail deep inside a per-path loop rather than at the boundary.
+        """
+        if key not in data.files:
+            return None
+        value = data[key]
+        return value if value.size else None
+
     with np.load(path, allow_pickle=True) as data:
         result = SimulationResult(
             daily_peaks=data["daily_peaks"],
             daily_means=data["daily_means"],
             daily_sum_app_peaks=data["daily_sum_app_peaks"],
             app_peaks=data["app_peaks"],
+            daily_r4ha=_optional(data, "daily_r4ha"),
+            daily_sum_app_r4ha=_optional(data, "daily_sum_app_r4ha"),
             days=[date.fromisoformat(str(d)) for d in data["days"]],
             apps=[str(a) for a in data["apps"]],
             fiscal_years=data["fiscal_years"],
@@ -547,6 +574,9 @@ def _load_simulation(path: Path, grid):
                 daily_peaks=result.daily_peaks[p],
                 daily_means=result.daily_means[p],
                 days=result.days,
+                daily_r4ha=(
+                    None if result.daily_r4ha is None else result.daily_r4ha[p]
+                ),
                 fiscal_years=result.fiscal_years,
             )
             for fy, value in reduce_by_fiscal_year(
@@ -554,5 +584,5 @@ def _load_simulation(path: Path, grid):
             ).items():
                 by_fy.setdefault(fy, []).append(value)
         result.reducer_by_fy[name] = {fy: np.asarray(v) for fy, v in by_fy.items()}
-    result.diagnostics = result.coincidence()
+    result.diagnostics = {**result.coincidence(), **result.coincidence_by_target()}
     return result

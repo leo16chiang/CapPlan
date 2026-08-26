@@ -4,11 +4,18 @@
 # app custodian. Change it here, not in code.
 
 calendar:
-  # CONFIRM IN WEEK 1. Everything downstream assumes 15-minute SMF intervals.
-  # If the RMF/SMF extract turns out to be 30-min or hourly, only this block
-  # and the intervals_per_day derived value change -- but the row count that
-  # justifies a neural Stage 1 changes with it.
-  interval_minutes: 15
+  # CONFIRM IN WEEK 1, from your own database:
+  #     SELECT * FROM <schema>.MVSPM_TIME_RES;
+  #
+  # 60 is the IZPCA/TDSz default and the value MVSPM_WORKLOAD2_HV implies. It
+  # cannot be finer than the SMF interval feeding it.
+  #
+  # At 60 minutes prime time is 9 intervals a day, not 36, and three years of
+  # 35 applications is ~236k rows rather than ~945k. That is the row count that
+  # was justifying a global neural Stage 1, so at hourly grain expect
+  # quantile_ridge or LightGBM to win the baseline gate -- run `capplan
+  # evaluate` and let it decide. See docs/peak_vs_average.md.
+  interval_minutes: 60
   prime_start: "08:00"
   prime_end: "17:00"          # exclusive -> 36 x 15-min intervals
   fiscal_year_start_month: 11 # fiscal year runs Nov -> Oct
@@ -34,6 +41,17 @@ normalisation:
   # MSU -> MIPS conversion. Also supplied, not estimated.
   mips_per_msu_default: 6.0
   mips_per_msu_by_cpu_model: {}
+
+  # An hourly figure is an hourly AVERAGE. The true peak inside the peak hour
+  # is higher, by a factor that is a property of your workload. MEASURE IT --
+  # one month of RMF interval data, max(interval) / max(hourly average) per
+  # day -- rather than carrying an assumed value into a board pack.
+  #
+  # 1.0 means "not yet measured", and the pack says so rather than silently
+  # applying nothing. Applies to the hardware-sizing targets only: R4HA is an
+  # average of averages and needs no uplift.
+  peak_to_hourly_uplift: 1.0
+  peak_to_hourly_uplift_basis: "not yet measured"
 
 model:
   horizon_fiscal_years: 2
@@ -71,7 +89,15 @@ simulation:
   gaussian_copula:
     shrinkage: 0.1             # Ledoit-Wolf style shrink to diagonal
   seed: 20260101
-  reducer: "annual_max"        # see sim/reducers.py registry
+  # `capplan reducers` groups these by the decision they serve. Hardware
+  # sizing and MLC cost are different questions with different right answers;
+  # if you need both, produce both -- the simulation is identical and only the
+  # reduction differs.
+  reducer: "annual_max"        # hardware sizing
+  # reducer: "monthly_peak_r4ha"   # IBM sub-capacity MLC billing basis
+  # Rolling window for the R4HA family. 4 hours is IBM's definition; changing
+  # it means the number is no longer an R4HA.
+  r4ha_hours: 4.0
 
 evaluation:
   rolling_origin:

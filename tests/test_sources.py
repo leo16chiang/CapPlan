@@ -226,20 +226,23 @@ def test_probe_infers_the_interval_length(warehouse):
 def test_probe_findings_flag_an_interval_mismatch(warehouse, cfg):
     from capplan.pipeline import _probe_findings
 
+    # The warehouse fixture emits 15-minute intervals.
     report = make_source(warehouse).probe(date(2025, 6, 2), date(2025, 6, 4))
-    findings = _probe_findings(report, cfg.with_overrides({"calendar.interval_minutes": 30}))
-    assert any(f.startswith("FAIL intervals") and "30" in f for f in findings)
 
-    ok = _probe_findings(report, cfg)
-    assert any(f.startswith("OK intervals") for f in ok)
+    mismatched = _probe_findings(report, cfg.with_overrides({"calendar.interval_minutes": 60}))
+    assert any(f.startswith("FAIL intervals") and "60" in f for f in mismatched)
+
+    matched = _probe_findings(report, cfg.with_overrides({"calendar.interval_minutes": 15}))
+    assert any(f.startswith("OK intervals") for f in matched)
 
 
 def test_probe_findings_flag_missing_lpar_totals(cfg):
     from capplan.pipeline import _probe_findings
 
     findings = _probe_findings(
-        {"intervals": {"rows_sampled": 100, "interval_minutes_mode": 15.0, "distinct_app_id": 35,
-                       "msu_min": 1.0, "msu_max": 2.0},
+        {"intervals": {"rows_sampled": 100,
+                       "interval_minutes_mode": float(cfg.get("calendar.interval_minutes")),
+                       "distinct_app_id": 35, "msu_min": 1.0, "msu_max": 2.0},
          "lpar_totals": {"rows_sampled": 0}},
         cfg,
     )
@@ -251,7 +254,8 @@ def test_probe_findings_flag_a_broken_app_mapping(cfg):
     from capplan.pipeline import _probe_findings
 
     findings = _probe_findings(
-        {"intervals": {"rows_sampled": 100, "interval_minutes_mode": 15.0,
+        {"intervals": {"rows_sampled": 100,
+                       "interval_minutes_mode": float(cfg.get("calendar.interval_minutes")),
                        "distinct_app_id": 1, "msu_min": 1.0, "msu_max": 2.0},
          "lpar_totals": {"rows_sampled": 10}},
         cfg,

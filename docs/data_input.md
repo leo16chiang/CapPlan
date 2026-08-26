@@ -18,15 +18,10 @@ you.
 ## The 30-second version
 
 ```bash
-export CAPPLAN_DB2_HOST=your_host
-export CAPPLAN_DB2_PORT=50000
-export CAPPLAN_DB2_DATABASE=your_db
-export CAPPLAN_DB2_USER=your_user
-export CAPPLAN_DB2_PASSWORD='...'          # or CAPPLAN_DB2_PASSWORD_CMD
-export CAPPLAN_DB2_DRIVER='{IBM DB2 ODBC DRIVER}'
-
 pip install -e '.[db2]'
-capplan sources                             # driver present? env vars set?
+cp .env.example .env && $EDITOR .env        # credentials; git-ignored
+capplan sources                             # driver present? .env found?
+capplan tables                              # which table may feed what
 
 # edit config/sources.yaml -- the table and column names are guesses
 capplan probe --source db2 --from 2025-06-01 --to 2025-06-07
@@ -74,8 +69,31 @@ session open for four hours.
 ## Credentials
 
 `config/sources.yaml` is in version control. Nothing secret goes in it -- a
-password in git history outlives every attempt to remove it. Credentials come
-from the environment:
+password in git history outlives every attempt to remove it.
+
+Credentials go in `.env` in the project root, which is git-ignored. Copy
+`.env.example` and fill it in:
+
+```
+CAPPLAN_DB2_HOST=your_host
+CAPPLAN_DB2_PORT=50000
+CAPPLAN_DB2_DATABASE=your_db
+CAPPLAN_DB2_USER=your_user
+CAPPLAN_DB2_PASSWORD=...
+CAPPLAN_DB2_DRIVER={IBM DB2 ODBC DRIVER}
+```
+
+Loaded automatically at startup: `.env`, then `.env.local` for personal
+overrides on a shared checkout. **A variable already set in the real
+environment always wins**, so a scheduled batch or container injects
+credentials the normal way and the file stays a developer convenience rather
+than something that silently overrides production.
+
+The same variables work as plain exports if you prefer, and `--env-file` points
+at a different file. `capplan sources` reports which files were found, never
+their contents.
+
+Full list:
 
 | Variable | Notes |
 |---|---|
@@ -95,7 +113,28 @@ without it ever sitting in a shell variable:
 export CAPPLAN_DB2_PASSWORD_CMD='vault read -field=password secret/db2/capplan'
 ```
 
-`capplan sources` prints which variables are set (never their values).
+`capplan sources` prints which variables are set (never their values), and
+which dotenv files were loaded.
+
+`CAPPLAN_DB2_PASSWORD_CMD` is worth preferring over a literal: the value never
+lands in a file or a shell variable.
+
+## Before the queries: which table may feed what
+
+Your table list is IZPCA / TDSz, and most of those tables count the same CPU.
+A CICS transaction's CPU is in `CICS_TRANSACTIO_DP`, **and** in the CICS
+region's service class in `MVSPM_WORKLOAD2_HV`, **and** in the region's address
+space in `MVS_ADDRSPACE_D`. Summing them roughly doubles the answer, and the
+result looks plausible rather than wrong.
+
+`capplan tables` prints the catalogue. The short version: `MVSPM_WORKLOAD2_HV`
+is the **spine** -- the only complete, non-overlapping source with intra-day
+timing -- and everything else is a driver, an attribution key, or a validation
+figure. `capplan ingest` raises `DoubleCountError` rather than letting a driver
+feed `intervals`.
+
+Grain matters just as much. See `docs/peak_vs_average.md`, which is the longer
+answer to "which number do you actually want" now that the tables are known.
 
 ## The one thing that is not a detail
 

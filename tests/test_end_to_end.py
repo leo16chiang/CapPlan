@@ -35,11 +35,17 @@ def test_scope_drops_non_prod_and_off_prime(grid, cfg):
             "app_id": "A", "lpar": "PRDA", "environment": "PROD", "mips": 100.0, "msu": 16.0,
         }
     )
+    # Stated explicitly rather than inherited: the shipped default is hourly,
+    # and an interval index means nothing without the grain that produced it.
+    from capplan.data.calendar import grid_from_config
+
+    fine_cfg = cfg.with_overrides({"calendar.interval_minutes": 15})
+    fine_grid = grid_from_config(fine_cfg)
     scoped, report = scope_intervals(
-        pd.DataFrame(rows), grid, cfg, NormalisationTable.from_config(cfg)
+        pd.DataFrame(rows), fine_grid, fine_cfg, NormalisationTable.from_config(fine_cfg)
     )
     assert len(scoped) == 1                       # only PROD, 09:00, a weekday
-    assert scoped.iloc[0]["interval_idx"] == 4     # 09:00 is the fifth interval
+    assert scoped.iloc[0]["interval_idx"] == 4     # 09:00 is the fifth 15-min interval
     assert report.dropped_non_prod == 3
     assert report.dropped_off_prime == 3
 
@@ -47,10 +53,11 @@ def test_scope_drops_non_prod_and_off_prime(grid, cfg):
 def test_top_n_apps_are_kept_by_prime_time_mean(grid, cfg):
     rows = []
     for app, level in (("BIG", 1000.0), ("MID", 100.0), ("SMALL", 1.0)):
-        for interval in range(36):
+        for interval in range(grid.intervals_per_day):
+            start = grid.interval_starts[interval]
             rows.append(
                 {
-                    "ts": datetime(2026, 1, 5, 8 + interval // 4, 15 * (interval % 4)),
+                    "ts": datetime(2026, 1, 5, start.hour, start.minute),
                     "app_id": app, "lpar": "PRDA", "environment": "PROD",
                     "mips": level, "msu": level / 6,
                 }

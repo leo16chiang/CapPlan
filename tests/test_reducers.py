@@ -31,7 +31,10 @@ def make_path(n_days: int = 250, seed: int = 0) -> PathSummary:
 
 
 def test_every_reducer_returns_a_scalar():
+    """Including the R4HA family, which needs the rolling series supplied."""
+    rng = np.random.default_rng(1)
     path = make_path()
+    path.daily_r4ha = path.daily_peaks * rng.uniform(0.7, 0.95, len(path.daily_peaks))
     for name, reducer in REDUCERS.items():
         if reducer.needs_intervals:
             continue
