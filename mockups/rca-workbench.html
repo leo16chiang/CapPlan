@@ -1,0 +1,1045 @@
+<title>MIPS Deviation Workbench</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: operator console. Left rail nav, then summary -> findings -> evidence, top to bottom. */
+:root {
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #edf0f5;
+  --line: #d9dee7;
+  --fg: #121821;
+  --fg-2: #4a5364;
+  --fg-3: #788296;
+  --accent: #2e3fa3;
+  --accent-weak: #e4e7f8;
+  --series: #2a78d6;
+  --series-weak: #cde2fb;
+  --up: #e34948;
+  --down: #2a78d6;
+  --good: #0ca30c;
+  --warn: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --win: rgba(227, 73, 72, 0.07);
+  --basewin: rgba(46, 63, 163, 0.06);
+  --shadow: 0 1px 2px rgba(18, 24, 33, 0.06);
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1116; --surface: #161a21; --surface-2: #1e232c; --line: #2a303b;
+    --fg: #eef1f5; --fg-2: #b2b9c6; --fg-3: #808999;
+    --accent: #9aa5ff; --accent-weak: #262c4d;
+    --series: #3987e5; --series-weak: #1c3557;
+    --up: #e66767; --down: #3987e5;
+    --win: rgba(230, 103, 103, 0.10); --basewin: rgba(154, 165, 255, 0.08);
+    --shadow: none; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1116; --surface: #161a21; --surface-2: #1e232c; --line: #2a303b;
+  --fg: #eef1f5; --fg-2: #b2b9c6; --fg-3: #808999;
+  --accent: #9aa5ff; --accent-weak: #262c4d;
+  --series: #3987e5; --series-weak: #1c3557;
+  --up: #e66767; --down: #3987e5;
+  --win: rgba(230, 103, 103, 0.10); --basewin: rgba(154, 165, 255, 0.08);
+  --shadow: none; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 14px; line-height: 1.45; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--f-mono); }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--fg-3); }
+.fg2 { color: var(--fg-2); }
+
+.shell { display: grid; grid-template-columns: 212px minmax(0, 1fr); min-height: 100vh; }
+.rail { background: var(--surface); border-right: 1px solid var(--line); padding: 20px 14px; display: flex; flex-direction: column; gap: 24px; position: sticky; top: 0; height: 100vh; }
+.brand { font-family: var(--f-display); font-weight: 700; font-size: 17px; letter-spacing: 0.01em; line-height: 1.15; }
+.brand small { display: block; font-family: var(--f-mono); font-weight: 400; font-size: 11px; color: var(--fg-3); letter-spacing: 0.04em; margin-top: 4px; }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav button { all: unset; cursor: pointer; padding: 8px 10px; border-radius: 6px; color: var(--fg-2); font-weight: 500; display: flex; justify-content: space-between; align-items: center; }
+.nav button:hover { background: var(--surface-2); color: var(--fg); }
+.nav button[aria-current="page"] { background: var(--accent-weak); color: var(--accent); }
+.nav button:focus-visible { outline: 2px solid var(--accent); }
+.nav .count { font-family: var(--f-mono); font-size: 11px; background: var(--critical); color: #fff; border-radius: 9px; padding: 0 6px; }
+.rail-foot { margin-top: auto; font-size: 12px; color: var(--fg-3); display: grid; gap: 4px; }
+.rail-foot b { color: var(--fg-2); font-weight: 500; }
+
+main { padding-inline: 28px; padding-block: 20px 48px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.sample-banner { font-size: 12px; color: var(--fg-2); background: var(--surface-2); border: 1px dashed var(--line); border-radius: 6px; padding: 6px 10px; }
+.sample-banner b { font-weight: 600; }
+
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; }
+h1 { font-size: 26px; font-weight: 700; line-height: 1.1; }
+h2 { font-size: 18px; font-weight: 600; }
+h3 { font-size: 15px; font-weight: 600; }
+.eyebrow { font-family: var(--f-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3); }
+.page-head { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; }
+.page-head p { margin: 4px 0 0; color: var(--fg-2); max-width: 70ch; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; align-items: baseline; padding: 14px 16px 0; }
+.panel-head p { margin: 2px 0 0; font-size: 12.5px; color: var(--fg-3); }
+.panel-body { padding: 12px 16px 16px; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.seg button { all: unset; cursor: pointer; padding: 5px 11px; font-size: 13px; color: var(--fg-2); border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--surface); font-weight: 500; }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.field-label { font-size: 12px; color: var(--fg-3); margin-right: 6px; }
+.search { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 4px 8px; }
+.search input { all: unset; width: 170px; font-family: var(--f-mono); font-size: 13px; text-transform: uppercase; }
+.search input::placeholder { text-transform: none; font-family: var(--f-body); color: var(--fg-3); }
+
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 2px; }
+.kpi .v { font-family: var(--f-display); font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.kpi .s { font-size: 12px; color: var(--fg-3); }
+
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-weight: 500; font-size: 11.5px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th.r, td.r { text-align: right; }
+th button { all: unset; cursor: pointer; }
+th button:hover { color: var(--fg); }
+th button:focus-visible { outline: 2px solid var(--accent); }
+td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+tbody tr.click { cursor: pointer; }
+tbody tr.click:hover td { background: var(--surface-2); }
+.app-code { font-family: var(--f-mono); font-weight: 600; font-size: 13.5px; }
+.app-name { font-size: 12px; color: var(--fg-3); white-space: nowrap; }
+
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; padding: 1px 8px 1px 6px; border-radius: 10px; border: 1px solid var(--line); white-space: nowrap; color: var(--fg); background: var(--surface); }
+.pill i { font-style: normal; width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.pill.critical i { background: var(--critical); }
+.pill.warning i { background: var(--warn); }
+.pill.normal i { background: var(--good); }
+.pill.drift { border-style: dashed; color: var(--fg-2); }
+.chip { font-family: var(--f-mono); font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface-2); color: var(--fg-2); white-space: nowrap; border: 1px solid transparent; }
+button.chip { cursor: pointer; }
+button.chip:hover { border-color: var(--line); color: var(--fg); }
+.pattern { font-size: 12px; font-weight: 500; padding: 1px 7px; border-radius: 4px; white-space: nowrap; border: 1px solid var(--line); }
+.up { color: var(--up); }
+.down { color: var(--down); }
+.new-badge { font-family: var(--f-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.06em; padding: 0 5px; border-radius: 3px; background: var(--up); color: #fff; margin-left: 6px; }
+
+.inv-head { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: flex-start; justify-content: space-between; }
+.inv-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.inv-title h1 { font-family: var(--f-mono); font-size: 30px; font-weight: 600; letter-spacing: 0.02em; }
+.back { all: unset; cursor: pointer; font-size: 12.5px; color: var(--accent); }
+.back:focus-visible { outline: 2px solid var(--accent); }
+.compute-line { font-size: 12px; color: var(--fg-3); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dot-live { width: 7px; height: 7px; border-radius: 50%; background: var(--good); display: inline-block; }
+.dot-live.run { background: var(--warn); animation: pulse 0.9s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .dot-live.run, .shimmer { animation: none !important; } }
+
+.findings { display: grid; gap: 10px; }
+.finding { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 4px 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.finding .rank { font-family: var(--f-display); font-size: 22px; font-weight: 700; color: var(--fg-3); line-height: 1; }
+.finding.top { border-color: var(--accent); }
+.finding.top .rank { color: var(--accent); }
+.finding h3 { font-size: 15.5px; }
+.finding p { margin: 4px 0 8px; color: var(--fg-2); max-width: 78ch; }
+.finding .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.finding .impact { text-align: right; display: grid; gap: 2px; align-content: start; min-width: 110px; }
+.finding .impact .v { font-family: var(--f-display); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.finding .impact .s { font-size: 11.5px; color: var(--fg-3); }
+
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+
+.chart-wrap { position: relative; }
+.chart-wrap svg { display: block; overflow: visible; }
+.axis text { fill: var(--fg-3); font-size: 11px; font-family: var(--f-mono); }
+.gridline { stroke: var(--line); stroke-width: 1; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); min-width: 170px; z-index: 5; }
+.tip .row { display: flex; justify-content: space-between; gap: 14px; font-variant-numeric: tabular-nums; }
+.tip .sw { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin-right: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--fg-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend .sw { width: 16px; height: 0; border-top: 2px solid; display: inline-block; }
+.legend .box { width: 12px; height: 10px; display: inline-block; border-radius: 2px; }
+
+.decomp { display: grid; grid-template-columns: minmax(84px, max-content) minmax(0, 1fr) 76px; gap: 6px 10px; align-items: center; font-size: 12.5px; }
+.decomp .name { font-family: var(--f-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.track { position: relative; height: 14px; }
+.track .zero { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--fg-3); }
+.track .bar { position: absolute; top: 1px; height: 12px; border-radius: 3px; }
+.decomp .val { text-align: right; font-variant-numeric: tabular-nums; }
+.recon { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 12.5px; color: var(--fg-2); }
+.recon b { font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+.meter { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; width: 120px; display: inline-block; vertical-align: middle; margin-left: 6px; }
+.meter > span { display: block; height: 100%; background: var(--series); border-radius: 3px; }
+
+.mini-track { position: relative; width: 120px; height: 12px; display: inline-block; vertical-align: middle; }
+.mini-track .zero { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--fg-3); }
+.mini-track .bar { position: absolute; top: 1px; height: 10px; border-radius: 2px; }
+.delta-cell { display: flex; align-items: center; gap: 8px; justify-content: flex-end; white-space: nowrap; }
+.delta-cell .n { width: 54px; text-align: right; }
+.sub { font-size: 11.5px; color: var(--fg-3); white-space: nowrap; }
+.shimmer { display: inline-block; height: 10px; width: 90px; border-radius: 3px; background: linear-gradient(90deg, var(--surface-2), var(--line), var(--surface-2)); background-size: 200% 100%; animation: sh 1s linear infinite; }
+@keyframes sh { to { background-position: -200% 0; } }
+tr.hl td { background: var(--accent-weak); }
+.note { font-size: 12px; color: var(--fg-3); margin-top: 10px; max-width: 80ch; }
+
+.coverage { display: flex; flex-wrap: wrap; gap: 6px; }
+.cov { font-family: var(--f-mono); font-size: 11px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--line); display: inline-flex; gap: 5px; align-items: center; background: var(--surface); }
+.cov i { font-style: normal; width: 7px; height: 7px; border-radius: 50%; }
+.cov.ok i { background: var(--good); }
+.cov.nodata i { background: var(--fg-3); }
+.cov.partial i { background: var(--warn); }
+.cov.pending i { background: var(--warn); animation: pulse 0.9s infinite; }
+
+.doc { display: grid; gap: 16px; max-width: 980px; }
+.doc .panel-body p, .doc li { max-width: 72ch; color: var(--fg-2); }
+.doc ol, .doc ul { padding-left: 20px; margin: 6px 0; display: grid; gap: 6px; }
+.doc strong { color: var(--fg); font-weight: 600; }
+pre.code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; background: var(--surface-2); border-radius: 6px; padding: 12px 14px; overflow-x: auto; margin: 8px 0 0; color: var(--fg); }
+.flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.flow > div { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--surface); }
+.flow b { font-family: var(--f-display); font-size: 15px; display: block; margin-bottom: 4px; }
+.flow span { font-size: 12.5px; color: var(--fg-2); }
+.role-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+
+@media (max-width: 1100px) {
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 860px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 16px; gap: 10px 18px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .nav { flex-direction: row; flex-wrap: wrap; }
+  .rail-foot { display: none; }
+  main { padding-inline: 16px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .role-legend { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  .finding { grid-template-columns: 26px minmax(0, 1fr); }
+  .finding .impact { grid-column: 2; text-align: left; }
+  .flow { grid-template-columns: minmax(0, 1fr); }
+  .inv-title h1 { font-size: 24px; }
+}
+</style>
+
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<script>
+"use strict";
+const { useState, useMemo, useEffect, useRef, useLayoutEffect } = React;
+const html = htm.bind(React.createElement);
+
+/* ======================================================================
+   SAMPLE DATA. Deterministic synthetic data, seeded per app code.
+   In the real app every structure below comes from a FastAPI endpoint.
+   ====================================================================== */
+
+function rng(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hash(s) { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+function gauss(r) { const u = Math.max(r(), 1e-9), v = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+const std = (a) => { const m = mean(a); return Math.sqrt(mean(a.map((x) => (x - m) ** 2))); };
+
+// 120 business days ending Friday 2 Oct 2026
+const N = 120, BASE_DAYS = 20;
+const DATES = (() => {
+  const out = []; const d = new Date(Date.UTC(2026, 9, 2));
+  while (out.length < N) { const w = d.getUTCDay(); if (w !== 0 && w !== 6) out.unshift(new Date(d)); d.setUTCDate(d.getUTCDate() - 1); }
+  return out;
+})();
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const fmtDate = (d) => `${MON[d.getUTCMonth()]} ${d.getUTCDate()}`;
+const fmt0 = (n) => Math.round(n).toLocaleString("en-US");
+const fmt1 = (n) => n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const sgn = (x) => (x >= 0 ? "+" : "−");
+const pct = (x, d = 1) => `${sgn(x)}${Math.abs(x * 100).toFixed(d)}%`;
+const signed0 = (x) => `${sgn(x)}${fmt0(Math.abs(x))}`;
+const fmtK = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e4 ? `${(n / 1e3).toFixed(1)}k` : n >= 100 ? fmt0(n) : n.toFixed(2);
+
+// Table registry. Roles: tracking | breakdown | driver. 13 today; the UI renders from this list.
+const TABLES = [
+  { name: "CAP_GRP_MIPS_D", role: "tracking", grain: "day", smf: "derived", measures: "MIPS by capacity group / app code", repo: true },
+  { name: "MVSPM_WORKLOAD2_HV", role: "breakdown", grain: "hour", smf: "72.3", measures: "CPU by WLM service class / report class", repo: true },
+  { name: "MVS_ADDRSPACE_D", role: "breakdown", grain: "day", smf: "30", measures: "CPU by address space / job name", repo: true },
+  { name: "MVS_ADDRDIS_ACCT_M", role: "breakdown", grain: "month", smf: "30", measures: "Address-space CPU by account code", repo: true },
+  { name: "CICS_TRANSACTIO_DP", role: "driver", grain: "day", smf: "110", measures: "CICS transactions, CPU and response by tran", repo: true, sc: "CICSPROD", vol: "tx/day", unit: "CPU ms / tx", u0: 3.1, v0: 42000, short: "CICS" },
+  { name: "IMS_SYSTEM_TRAN2_D", role: "driver", grain: "day", smf: "IMS 56FA", measures: "IMS transactions and response by tran", repo: true, sc: "IMSPROD", vol: "tx/day", unit: "CPU ms / tx", u0: 4.6, v0: 31000, short: "IMS" },
+  { name: "WAS_INT_SERVLETS_H", role: "driver", grain: "hour", smf: "120", measures: "Servlet requests and response time", repo: true, sc: "WASPROD", vol: "req/day", unit: "CPU ms / req", u0: 7.8, v0: 18500, short: "WAS" },
+  { name: "MVSPM_WORKLOAD2_HV_WEBGROUPS", role: "driver", grain: "hour", smf: "72.3", measures: "WebSphere web-group activity", repo: true, sc: "WASPROD", vol: "req/day", unit: "CPU ms / req", u0: 6.9, v0: 21000, short: "Webgroups", weight: 0.6 },
+  { name: "KPMZ_JOB_INT_D", role: "driver", grain: "day", smf: "30", measures: "Batch jobs, elapsed and CPU by job", repo: true, sc: "BATPROD", vol: "jobs in prime time", unit: "CPU sec / job", u0: 410, v0: 11, short: "Batch" },
+  { name: "DB2_PACKAGE_H", role: "driver", grain: "hour", smf: "101", measures: "Db2 accounting by package", repo: false, sc: "DB2DDF", vol: "SQL calls/day", unit: "CPU µs / call", u0: 86, v0: 2.4e6, short: "Db2" },
+  { name: "MQ_QUEUE_H", role: "driver", grain: "hour", smf: "116", measures: "MQ messages and CPU by queue", repo: false, sc: "WASPROD", vol: "msgs/day", unit: "CPU µs / msg", u0: 140, v0: 260000, short: "MQ", weight: 0.3 },
+  { name: "CICS_FILE_D", role: "driver", grain: "day", smf: "110", measures: "CICS file requests by file", repo: false, sc: "CICSPROD", vol: "file req/day", unit: "CPU µs / req", u0: 38, v0: 510000, short: "CICS files", weight: 0.3 },
+  { name: "MVS_ZIIP_ELIG_D", role: "driver", grain: "day", smf: "72.3", measures: "zIIP-eligible CPU that ran on general CPs", repo: false, sc: "DB2DDF", vol: "zIIP-eligible CPU sec", unit: "% run on GCP", u0: 6, v0: 9200, short: "zIIP", weight: 0.25 },
+];
+const DRIVERS = TABLES.filter((t) => t.role === "driver");
+const T = Object.fromEntries(TABLES.map((t) => [t.name, t]));
+const SCS = ["CICSPROD", "DB2DDF", "WASPROD", "BATPROD", "IMSPROD", "STCMED"];
+
+const APPS = [
+  { code: "CLMS", name: "Claims adjudication", b: 620, sc: "efficiency", start: N - 7, mag: 0.27, shares: { CICSPROD: .5, DB2DDF: .2, WASPROD: .12, BATPROD: .1, STCMED: .08 } },
+  { code: "WIRE", name: "Wire transfers", b: 410, sc: "volume", start: N - 6, mag: 0.22, shares: { WASPROD: .35, CICSPROD: .3, DB2DDF: .2, BATPROD: .05, STCMED: .1 } },
+  { code: "STMT", name: "Customer statements", b: 280, sc: "newwork", start: N - 4, mag: 0.19, shares: { BATPROD: .45, CICSPROD: .2, DB2DDF: .2, STCMED: .15 } },
+  { code: "FRAD", name: "Fraud scoring", b: 300, sc: "drift", growth: 0.0019, shares: { WASPROD: .3, DB2DDF: .3, CICSPROD: .25, STCMED: .15 } },
+  { code: "PAYX", name: "Payroll exchange", b: 300, sc: "drop", start: N - 5, mag: 0.14, shares: { IMSPROD: .55, BATPROD: .2, DB2DDF: .15, STCMED: .1 } },
+  { code: "CUST", name: "Customer profile", b: 520, sc: "volume", start: N - 5, mag: 0.085, mild: true, shares: { CICSPROD: .45, DB2DDF: .25, WASPROD: .15, STCMED: .15 } },
+  { code: "ACCT", name: "Account master", b: 890 }, { code: "CRDT", name: "Card authorisation", b: 760 },
+  { code: "DPST", name: "Deposits", b: 680 }, { code: "ATMN", name: "ATM network", b: 450 },
+  { code: "GLDG", name: "General ledger", b: 330 }, { code: "BROK", name: "Brokerage", b: 310 },
+  { code: "MRTG", name: "Mortgage servicing", b: 260 }, { code: "LNOR", name: "Loan origination", b: 240 },
+  { code: "TELL", name: "Teller platform", b: 230 }, { code: "BILL", name: "Billing", b: 210 },
+  { code: "INSR", name: "Insurance policy", b: 190 }, { code: "RISK", name: "Risk aggregation", b: 170 },
+  { code: "TRSY", name: "Treasury", b: 150 }, { code: "CARD", name: "Card issuing", b: 140 },
+  { code: "HRPY", name: "HR payroll", b: 120 }, { code: "EDIX", name: "EDI exchange", b: 110 },
+  { code: "CMPL", name: "Compliance reporting", b: 95 }, { code: "DOCS", name: "Document imaging", b: 80 },
+];
+APPS.forEach((a) => {
+  if (!a.shares) {
+    const r = rng(hash(a.code + "s")); const raw = {};
+    SCS.forEach((s) => { raw[s] = r() < 0.25 ? 0 : 0.2 + r(); });
+    const tot = Object.values(raw).reduce((x, y) => x + y, 0); a.shares = {};
+    SCS.forEach((s) => { if (raw[s]) a.shares[s] = raw[s] / tot; });
+  }
+  a.series = genSeries(a);
+});
+
+function genSeries(a) {
+  const r = rng(hash(a.code));
+  const g = a.growth ?? (r() * 0.0006 - 0.0001);
+  const wd = [0, 1.03, 1.0, 0.99, 1.0, 0.96];
+  const planOff = 1 + (r() * 0.05 - 0.025);
+  const actual = [], plan = [];
+  let monthStart = 0;
+  for (let t = 0; t < N; t++) {
+    const d = DATES[t];
+    if (t > 0 && d.getUTCMonth() !== DATES[t - 1].getUTCMonth()) monthStart = t;
+    let v = a.b * (1 + g * t) * wd[d.getUTCDay()] * (1 + 0.028 * gauss(r));
+    if (a.start != null && t >= a.start) {
+      const ramp = Math.min(1, (t - a.start + 1) / 2);
+      v *= 1 + (a.sc === "drop" ? -1 : 1) * a.mag * ramp;
+    }
+    actual.push(v);
+    const pg = a.sc === "drift" ? 0.0003 : g;
+    plan.push(a.b * (1 + pg * (monthStart + 10)) * planOff);
+  }
+  const tm = [], tsd = [];
+  for (let t = 0; t < N; t++) {
+    if (t < BASE_DAYS) { tm.push(null); tsd.push(null); continue; }
+    const w = actual.slice(t - BASE_DAYS, t); tm.push(mean(w)); tsd.push(std(w));
+  }
+  return { actual, plan, tm, tsd };
+}
+
+function windowLen(app, preset) {
+  if (preset === "auto") return app.start != null ? Math.max(3, N - app.start) : 5;
+  return Number(preset);
+}
+
+function deviation(app, W, mode) {
+  const s = app.series, ws = N - W;
+  const cur = mean(s.actual.slice(ws));
+  const bw = s.actual.slice(ws - BASE_DAYS, ws);
+  const tm = mean(bw), sd = std(bw);
+  const planAvg = mean(s.plan.slice(ws));
+  const base = mode === "plan" ? planAvg : tm;
+  const d = cur / base - 1;
+  const drift = tm / mean(s.plan.slice(ws - BASE_DAYS, ws)) - 1;
+  const sev = Math.abs(d) >= 0.15 ? "critical" : Math.abs(d) >= 0.07 ? "warning" : "normal";
+  return { cur, base, tm, sd, planAvg, d, z: (cur - tm) / sd, drift, sev, ws, we: N - 1, bs: ws - BASE_DAYS, be: ws - 1 };
+}
+
+// Fraction of the scenario visible in the window minus any that leaked into the baseline period.
+function intensity(app, dev) {
+  if (app.start == null) return app.sc === "drift" ? 1 : 0;
+  const inWin = Math.max(0, N - Math.max(app.start, dev.ws)) / (N - dev.ws);
+  const inBase = Math.max(0, dev.be + 1 - Math.max(app.start, dev.bs)) / BASE_DAYS;
+  return Math.max(0, inWin - inBase);
+}
+
+const ALLOC = {
+  efficiency: { CICSPROD: .72, DB2DDF: .22, STCMED: .06 },
+  volume: { WASPROD: .42, CICSPROD: .36, DB2DDF: .17, STCMED: .05 },
+  newwork: { BATPROD: .86, DB2DDF: .1, STCMED: .04 },
+  drop: { IMSPROD: .9, BATPROD: .06, STCMED: .04 },
+};
+const ASID = { CICSPROD: ["CIC1", "CIC2"], DB2DDF: ["DIST"], WASPROD: ["WAS1", "WAS2"], BATPROD: ["B*"], IMSPROD: ["MPP1", "MPP2"], STCMED: ["STC"] };
+
+const MOVERS = {
+  CLMS: [["CL04", "CICS_TRANSACTIO_DP", 1840, 2960], ["CLMPK04", "DB2_PACKAGE_H", 1120, 1890], ["CL01", "CICS_TRANSACTIO_DP", 960, 1012], ["CL07", "CICS_TRANSACTIO_DP", 300, 318], ["CLMB220", "KPMZ_JOB_INT_D", 410, 402]],
+  WIRE: [["/wire/initiate", "WAS_INT_SERVLETS_H", 1320, 1710], ["WR01", "CICS_TRANSACTIO_DP", 1100, 1390], ["WIRE.INBOUND", "MQ_QUEUE_H", 260, 338], ["/wire/status", "WAS_INT_SERVLETS_H", 540, 630], ["WR05", "CICS_TRANSACTIO_DP", 210, 215]],
+  STMT: [["STMTX07", "KPMZ_JOB_INT_D", 0, 1180], ["STMTX08", "KPMZ_JOB_INT_D", 0, 640], ["STMPK01", "DB2_PACKAGE_H", 280, 312], ["STMTD01", "KPMZ_JOB_INT_D", 520, 530], ["ST20", "CICS_TRANSACTIO_DP", 300, 306]],
+  PAYX: [["PXUPD", "IMS_SYSTEM_TRAN2_D", 1420, 1140], ["PXINQ", "IMS_SYSTEM_TRAN2_D", 880, 730], ["PXPK11", "DB2_PACKAGE_H", 340, 312], ["PXB100", "KPMZ_JOB_INT_D", 300, 298]],
+  CUST: [["CU10", "CICS_TRANSACTIO_DP", 1500, 1660], ["CUPK02", "DB2_PACKAGE_H", 700, 760], ["/cust/profile", "WAS_INT_SERVLETS_H", 400, 432], ["CU22", "CICS_TRANSACTIO_DP", 300, 304]],
+  FRAD: [["/score/v3", "WAS_INT_SERVLETS_H", 1600, 1720], ["FRPK01", "DB2_PACKAGE_H", 900, 968], ["FR02", "CICS_TRANSACTIO_DP", 700, 744], ["FRAUD.EVT", "MQ_QUEUE_H", 180, 190]],
+};
+
+function investigate(app, preset, mode) {
+  const W = windowLen(app, preset);
+  const dev = deviation(app, W, mode);
+  const k = intensity(app, dev);
+  const r = rng(hash(app.code + preset));
+  const dTrail = dev.cur - dev.tm;          // breakdown always explains window vs baseline period
+  const explainF = 0.9 + r() * 0.07;
+
+  // Breakdown (additive, same CPU counted once)
+  const alloc = ALLOC[app.sc] || app.shares;
+  const scRows = SCS.filter((s) => app.shares[s]).map((s) => {
+    const base = dev.tm * app.shares[s] * 0.94;
+    const delta = dTrail * explainF * (alloc[s] || 0) + base * 0.012 * gauss(r) * (app.sc && app.sc !== "drift" ? 0.4 : 1);
+    return { name: s, base, cur: base + delta };
+  });
+  const spineDelta = scRows.reduce((x, y) => x + y.cur - y.base, 0);
+  const asRows = [];
+  scRows.forEach((row) => {
+    const parts = ASID[row.name];
+    parts.forEach((p, i) => {
+      const f = parts.length === 1 ? 1 : i === 0 ? 0.62 : 0.38;
+      const fd = parts.length === 1 ? 1 : i === 0 ? 0.8 : 0.2;
+      asRows.push({ name: app.code + p, base: row.base * f, cur: row.base * f + (row.cur - row.base) * fd });
+    });
+  });
+
+  // Driver evidence (overlapping views, never summed)
+  const drivers = DRIVERS.map((t) => {
+    const share = app.shares[t.sc] || 0;
+    if (!share) return { t, status: "nodata" };
+    const rr = rng(hash(app.code + t.name + preset));
+    let v = 0.025 * gauss(rr), u = 0.02 * gauss(rr);
+    const sc = app.sc;
+    const m = (app.mild ? 0.4 : 1) * k;
+    if (sc === "efficiency") { if (t.short === "CICS") { v = 0.018; u = 0.36 * m; } if (t.short === "Db2") u = 0.41 * m; if (t.short === "CICS files") u = 0.05 * m; }
+    if (sc === "volume") { const vv = { WAS: .27, Webgroups: .25, CICS: .24, MQ: .29, Db2: .19, "CICS files": .22 }[t.short]; if (vv) { v = vv * m; u = 0.008 * gauss(rr); } }
+    if (sc === "newwork" && t.short === "Batch") { v = 0.18 * m; u = 0.62 * m; }
+    if (sc === "drop" && t.short === "IMS") { v = -0.18 * m; u = 0.01; }
+    if (sc === "drop" && t.short === "Db2") { v = -0.06 * m; }
+    if (sc === "drift") { v = 0.035 + 0.01 * gauss(rr); }
+    const shareMips = dev.tm * share * (t.weight ?? 1);
+    const impact = shareMips * ((1 + v) * (1 + u) - 1);
+    const vb = t.v0 * (0.6 + rr() * 0.8) * share * 2, ub = t.u0 * (0.8 + rr() * 0.4);
+    return { t, status: t.grain === "month" ? "partial" : "ok", v, u, impact, vb, vc: vb * (1 + v), ub, uc: ub * (1 + u) };
+  });
+
+  // Movers
+  const mv = (MOVERS[app.code] || genericMovers(app)).map(([item, table, b, c]) => {
+    const cc = b === 0 ? (k > 0 ? c : 0) : b + (c - b) * (app.sc === "drift" ? 1 : k || 0.05);
+    return { item, table, base: b, cur: cc, isNew: b === 0 };
+  }).filter((m) => !(m.isNew && m.cur === 0));
+
+  // Hourly profile (MIPS, from the hourly breakdown table)
+  const shape = [.30,.27,.26,.26,.28,.33,.45,.62,.86,.98,1,.97,.86,.9,.96,.93,.84,.7,.56,.48,.44,.40,.36,.33];
+  const hb = shape.map((x) => x * dev.tm * 1.18);
+  const lift = dTrail / dev.tm;
+  const hc = hb.map((x, h) => {
+    let f = lift;
+    if (app.sc === "newwork") f = (h >= 9 && h <= 11 ? lift * 3.2 : lift * 0.12);
+    if (app.sc === "volume") f = lift * (h >= 9 && h <= 15 ? 1.25 : 0.55);
+    return x * (1 + f);
+  });
+
+  const findings = buildFindings(app, dev, k, drivers, mv, dTrail, hb, hc);
+  return { W, dev, k, scRows, asRows, spineDelta, dTrail, drivers, movers: mv, hourly: { base: hb, cur: hc }, findings };
+}
+
+function genericMovers(app) {
+  const r = rng(hash(app.code + "mv"));
+  const tbls = DRIVERS.filter((t) => app.shares[t.sc] && t.grain !== "month");
+  return Array.from({ length: 4 }, (_, i) => {
+    const t = tbls[Math.floor(r() * tbls.length)];
+    const b = 200 + r() * 900;
+    return [`${app.code.slice(0, 2)}${t.short === "Batch" ? "B" : t.short === "Db2" ? "PK" : ""}${10 + i * 7}`, t.name, b, b * (1 + 0.05 * gauss(r))];
+  });
+}
+
+function drv(drivers, short) { return drivers.find((d) => d.t.short === short && d.status !== "nodata"); }
+
+function buildFindings(app, dev, k, drivers, movers, dTrail, hb, hc) {
+  const sd = app.start != null ? fmtDate(DATES[app.start]) : null;
+  const F = [];
+  const share = (x) => (Math.abs(dTrail) > 1 ? Math.round((x / dTrail) * 100) : 0);
+  if (app.sc && app.sc !== "drift" && k < 0.15) {
+    return [{ title: "The change isn't in this window", body: `The shift in ${app.code} began on ${sd}, which falls inside the baseline period for this window. Choose "Since change" or a shorter window.`, pattern: "Window", conf: "Info", impact: null, evidence: ["CAP_GRP_MIPS_D"] }];
+  }
+  if (app.sc === "efficiency") {
+    const c = drv(drivers, "CICS"), d = drv(drivers, "Db2"), m = movers[0];
+    F.push({ title: `CPU per CICS transaction up ${pct(c.u, 0)} since ${sd}; volume flat`, body: `Transaction ${m.item} accounts for most of it, using ${fmt0(m.cur - m.base)} more CPU sec/day. Volume is within its normal range (${pct(c.v)}), which points to a code or access-path change rather than more demand.`, pattern: "Costlier per unit", conf: "High", impact: c.impact, sharePct: share(c.impact), evidence: ["CICS_TRANSACTIO_DP", "MVSPM_WORKLOAD2_HV", "MVS_ADDRSPACE_D"] });
+    F.push({ title: `Db2 package CLMPK04 costs ${pct(d.u, 0)} more per SQL call`, body: `Getpages per call rose in step with CPU. Check for a rebind, a statistics run or an index change around ${sd}. CL04 is the main caller of this package, so this is likely the same cause as finding 1.`, pattern: "Costlier per unit", conf: "Medium", impact: d.impact, sharePct: share(d.impact), evidence: ["DB2_PACKAGE_H"] });
+    F.push({ title: "Intraday shape unchanged", body: "The increase is spread evenly across prime time. That fits a per-unit cost change; new work would show up as a hump at the hours it runs.", pattern: "Supporting", conf: "Low", impact: null, evidence: ["MVSPM_WORKLOAD2_HV"] });
+  } else if (app.sc === "volume") {
+    const w = drv(drivers, "WAS"), c = drv(drivers, "CICS"), q = drv(drivers, "MQ");
+    const vs = [w, c, q].filter(Boolean);
+    const lo = Math.min(...vs.map((x) => x.v)), hi = Math.max(...vs.map((x) => x.v));
+    F.push({ title: `Request volume up ${pct(lo, 0)} to ${pct(hi, 0)} across ${vs.map((x) => x.t.short).join(", ")}; cost per request flat`, body: `${movers[0].item} and ${movers[1].item} lead the growth. Cost per unit is within ±2%, so the extra MIPS follow demand. Confirm with the business whether this is expected: a new channel, a campaign or a seasonal peak.`, pattern: "More volume", conf: app.mild ? "Medium" : "High", impact: vs.reduce((x, y) => Math.max(x, y.impact), 0), sharePct: null, evidence: vs.map((x) => x.t.name) });
+    const peak = (hc[10] / hb[10] - 1);
+    F.push({ title: `Peak hours grew most (10:00–11:00 ${pct(peak, 0)})`, body: "The growth is concentrated in the online day, so it raises the prime-time peak more than the daily average. That matters for the forecast.", pattern: "Supporting", conf: "Medium", impact: null, evidence: ["MVSPM_WORKLOAD2_HV"] });
+  } else if (app.sc === "newwork") {
+    const newOnes = movers.filter((m) => m.isNew);
+    const add = newOnes.reduce((x, y) => x + y.cur, 0);
+    const b = drv(drivers, "Batch"), c = drv(drivers, "CICS");
+    F.push({ title: `${newOnes.length} batch jobs not seen in the baseline period now run in prime time`, body: `${newOnes.map((m) => m.item).join(" and ")} started on ${sd} and run 09:00–11:30. Together they add ${fmt0(add)} CPU sec/day. Ask the scheduling team whether they were meant to run overnight.`, pattern: "New work", conf: "High", impact: b.impact, sharePct: share(b.impact), evidence: ["KPMZ_JOB_INT_D", "MVS_ADDRSPACE_D"] });
+    F.push({ title: "New 09:00–11:00 hump in the hourly profile", body: "The hours outside that band are close to baseline, which rules out a general cost increase.", pattern: "Supporting", conf: "Medium", impact: null, evidence: ["MVSPM_WORKLOAD2_HV"] });
+    if (c) F.push({ title: "Online workload unchanged", body: `CICS volume ${pct(c.v)} and cost per transaction ${pct(c.u)}, both within normal variation.`, pattern: "Ruled out", conf: "Low", impact: null, evidence: ["CICS_TRANSACTIO_DP"] });
+  } else if (app.sc === "drop") {
+    const i = drv(drivers, "IMS");
+    F.push({ title: `IMS transaction volume down ${pct(-i.v, 0).slice(1)}; cost per transaction unchanged`, body: `${movers[0].item} and ${movers[1].item} fell together from ${sd}. Check for an upstream outage, a routing change or a function moved to another platform. A drop can also mean the work moved to another app code.`, pattern: "Less volume", conf: "High", impact: i.impact, sharePct: share(i.impact), evidence: ["IMS_SYSTEM_TRAN2_D", "MVSPM_WORKLOAD2_HV"] });
+    F.push({ title: "Batch stable", body: "Prime-time job count and CPU per job are within normal ranges.", pattern: "Ruled out", conf: "Low", impact: null, evidence: ["KPMZ_JOB_INT_D"] });
+  } else if (app.sc === "drift") {
+    const monthly = app.growth * 21;
+    F.push({ title: `Usage is growing about ${pct(monthly, 1).slice(1)} a month, ahead of plan`, body: `The trailing baseline moves up with the growth, so a trailing comparison shows only ${pct(dev.cur / dev.tm - 1)}. Against plan the app is ${pct(dev.cur / dev.planAvg - 1)}. Raise it with the custodian before the next forecast cycle.`, pattern: "Plan drift", conf: "High", impact: dev.cur - dev.planAvg, sharePct: null, impactLabel: "vs plan", evidence: ["CAP_GRP_MIPS_D"] });
+    F.push({ title: "Growth is volume-led and spread across drivers", body: "Every driver shows a small volume increase with flat unit cost. No single transaction or job stands out.", pattern: "More volume", conf: "Medium", impact: null, evidence: DRIVERS.filter((t) => app.shares[t.sc]).slice(0, 3).map((t) => t.name) });
+  } else {
+    const best = drivers.filter((d) => d.status === "ok").sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact))[0];
+    F.push({ title: "No material deviation", body: `${app.code} is ${pct(dev.d)} against the selected baseline, inside normal variation (${fmt1(Math.abs(dev.z))}σ).${best ? ` The largest driver movement is ${best.t.short} at ${pct(best.v)} volume, ${pct(best.u)} unit cost.` : ""}`, pattern: "Stable", conf: "Info", impact: null, evidence: ["CAP_GRP_MIPS_D"] });
+  }
+  return F;
+}
+
+function classify(v, u) {
+  const t = 0.05;
+  if (Math.abs(v) < t && Math.abs(u) < t) return "Stable";
+  if (v >= t && u >= t) return "Volume + cost";
+  if (v <= -t && Math.abs(u) < t) return "Less volume";
+  if (v >= t && Math.abs(u) < t) return "More volume";
+  if (u >= t) return "Costlier per unit";
+  if (u <= -t) return "Cheaper per unit";
+  return "Mixed";
+}
+
+/* ======================================================================
+   Charts
+   ====================================================================== */
+
+function useWidth(init = 640) {
+  const ref = useRef(null); const [w, setW] = useState(init);
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    setW(ref.current.clientWidth);
+    const ro = new ResizeObserver((e) => setW(Math.max(200, e[0].contentRect.width)));
+    ro.observe(ref.current); return () => ro.disconnect();
+  }, []);
+  return [ref, w];
+}
+function niceTicks(lo, hi, n = 4) {
+  const raw = (hi - lo) / n, p = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * p).find((s) => s >= raw);
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(v);
+  return out;
+}
+
+function Spark({ values, ws, sev }) {
+  const W = 120, H = 28, n = values.length;
+  const lo = Math.min(...values), hi = Math.max(...values), sp = hi - lo || 1;
+  const x = (i) => (i / (n - 1)) * W, y = (v) => H - 3 - ((v - lo) / sp) * (H - 6);
+  const pts = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const col = "var(--series)";
+  return html`<svg width=${W} height=${H} viewBox=${`0 0 ${W} ${H}`} aria-hidden="true">
+    <rect x=${x(ws)} y="0" width=${W - x(ws)} height=${H} fill="var(--win)" />
+    <polygon points=${`0,${H} ${pts} ${W},${H}`} fill="var(--series-weak)" opacity="0.6" />
+    <polyline points=${pts} fill="none" stroke=${col} stroke-width="1.5" stroke-linejoin="round" />
+    <circle cx=${x(n - 1)} cy=${y(values[n - 1])} r="2.5" fill=${sev === "normal" ? col : sev === "critical" ? "var(--critical)" : "var(--warn)"} stroke="var(--surface)" stroke-width="1.5" />
+  </svg>`;
+}
+
+function TrendChart({ app, dev, mode }) {
+  const [ref, width] = useWidth();
+  const [hover, setHover] = useState(null);
+  const s = app.series, from = 30;
+  const H = 260, m = { l: 48, r: 14, t: 12, b: 26 };
+  const iw = width - m.l - m.r, ih = H - m.t - m.b;
+  const idx = []; for (let i = from; i < N; i++) idx.push(i);
+  const vals = idx.flatMap((i) => [s.actual[i], s.plan[i], s.tm[i] + 2 * s.tsd[i], s.tm[i] - 2 * s.tsd[i]]);
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  const ticks = niceTicks(lo, hi);
+  const x = (i) => m.l + ((i - from) / (N - 1 - from)) * iw;
+  const y = (v) => m.t + ih - ((v - lo) / (hi - lo)) * ih;
+  const line = (arr) => idx.map((i, k) => `${k ? "L" : "M"}${x(i).toFixed(1)},${y(arr[i]).toFixed(1)}`).join("");
+  const band = idx.map((i, k) => `${k ? "L" : "M"}${x(i).toFixed(1)},${y(s.tm[i] + 2 * s.tsd[i]).toFixed(1)}`).join("") +
+    idx.slice().reverse().map((i) => `L${x(i).toFixed(1)},${y(s.tm[i] - 2 * s.tsd[i]).toFixed(1)}`).join("") + "Z";
+  const months = idx.filter((i) => i === from || DATES[i].getUTCMonth() !== DATES[i - 1].getUTCMonth()).filter((i) => i !== from);
+  const step = (x(from + 1) - x(from)) / 2;
+  const onMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const i = Math.round(from + ((px - m.l) / iw) * (N - 1 - from));
+    setHover(i >= from && i < N ? i : null);
+  };
+  const planStrong = mode === "plan";
+  return html`<div class="chart-wrap" ref=${ref}>
+    <svg width=${width} height=${H} role="img" aria-label=${`Daily MIPS for ${app.code}, last 90 business days, with trailing baseline band and plan`}
+      onMouseMove=${onMove} onMouseLeave=${() => setHover(null)}>
+      <rect x=${x(dev.bs) - step} y=${m.t} width=${x(dev.be) - x(dev.bs) + 2 * step} height=${ih} fill="var(--basewin)" />
+      <rect x=${x(dev.ws) - step} y=${m.t} width=${x(dev.we) - x(dev.ws) + 2 * step} height=${ih} fill="var(--win)" />
+      <text x=${x(dev.bs) - step + 4} y=${m.t + 12} font-size="10.5" fill="var(--accent)" font-family="var(--f-mono)">BASELINE</text>
+      <text x=${x(dev.we) + step - 4} y=${m.t + 12} font-size="10.5" fill="var(--up)" font-family="var(--f-mono)" text-anchor="end">WINDOW</text>
+      <g class="axis">
+        ${ticks.map((t) => html`<g key=${t}><line class="gridline" x1=${m.l} x2=${m.l + iw} y1=${y(t)} y2=${y(t)} /><text x=${m.l - 8} y=${y(t) + 4} text-anchor="end">${fmt0(t)}</text></g>`)}
+        ${months.map((i) => html`<text key=${i} x=${x(i)} y=${H - 6} text-anchor="middle">${MON[DATES[i].getUTCMonth()]}</text>`)}
+      </g>
+      <path d=${band} fill="var(--series-weak)" opacity=${planStrong ? 0.35 : 0.75} />
+      <path d=${line(s.tm)} fill="none" stroke="var(--series)" stroke-width="1" stroke-dasharray="2 3" opacity="0.8" />
+      <path d=${line(s.plan)} fill="none" stroke="var(--fg-2)" stroke-width=${planStrong ? 2 : 1.25} stroke-dasharray="6 4" />
+      <path d=${line(s.actual)} fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round" />
+      <circle cx=${x(N - 1)} cy=${y(s.actual[N - 1])} r="4" fill="var(--series)" stroke="var(--surface)" stroke-width="2" />
+      ${hover != null && html`<g>
+        <line x1=${x(hover)} x2=${x(hover)} y1=${m.t} y2=${m.t + ih} stroke="var(--fg-3)" stroke-width="1" />
+        <circle cx=${x(hover)} cy=${y(s.actual[hover])} r="4" fill="var(--series)" stroke="var(--surface)" stroke-width="2" />
+        <circle cx=${x(hover)} cy=${y(s.plan[hover])} r="3" fill="var(--fg-2)" stroke="var(--surface)" stroke-width="1.5" />
+      </g>`}
+      <rect x=${m.l} y=${m.t} width=${iw} height=${ih} fill="transparent" />
+    </svg>
+    ${hover != null && html`<div class="tip" style=${{ left: Math.min(x(hover) + 12, width - 190), top: 18 }}>
+      <div class="mono" style=${{ marginBottom: 4, fontWeight: 600 }}>${fmtDate(DATES[hover])} ${DATES[hover].getUTCFullYear()}</div>
+      <div class="row"><span><i class="sw" style=${{ background: "var(--series)" }}></i>Actual</span><b>${fmt0(s.actual[hover])}</b></div>
+      <div class="row"><span><i class="sw" style=${{ background: "var(--series)", opacity: 0.5 }}></i>Trailing 20d</span><span>${fmt0(s.tm[hover])} ± ${fmt0(2 * s.tsd[hover])}</span></div>
+      <div class="row"><span><i class="sw" style=${{ background: "var(--fg-2)" }}></i>Plan</span><span>${fmt0(s.plan[hover])}</span></div>
+      <div class="row muted"><span>vs ${mode === "plan" ? "plan" : "trailing"}</span><span>${pct(s.actual[hover] / (mode === "plan" ? s.plan[hover] : s.tm[hover]) - 1)}</span></div>
+    </div>`}
+  </div>`;
+}
+
+function HourlyChart({ base, cur }) {
+  const [ref, width] = useWidth(420);
+  const [hover, setHover] = useState(null);
+  const H = 220, m = { l: 44, r: 54, t: 10, b: 24 };
+  const iw = width - m.l - m.r, ih = H - m.t - m.b;
+  const hi = Math.max(...base, ...cur) * 1.06;
+  const ticks = niceTicks(0, hi);
+  const x = (h) => m.l + (h / 23) * iw, y = (v) => m.t + ih - (v / hi) * ih;
+  const path = (a) => a.map((v, h) => `${h ? "L" : "M"}${x(h).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const onMove = (e) => { const r = e.currentTarget.getBoundingClientRect(); const h = Math.round(((e.clientX - r.left - m.l) / iw) * 23); setHover(h >= 0 && h <= 23 ? h : null); };
+  const yb = y(base[23]), yc = y(cur[23]); const sep = Math.abs(yb - yc) < 13; const off = sep ? (yc < yb ? [7, -7] : [-7, 7]) : [0, 0];
+  return html`<div class="chart-wrap" ref=${ref}>
+    <svg width=${width} height=${H} role="img" aria-label="Average MIPS by hour, window versus baseline period" onMouseMove=${onMove} onMouseLeave=${() => setHover(null)}>
+      <rect x=${x(8)} y=${m.t} width=${x(17) - x(8)} height=${ih} fill="var(--surface-2)" />
+      <text x=${(x(8) + x(17)) / 2} y=${m.t + 12} text-anchor="middle" font-size="10.5" fill="var(--fg-3)" font-family="var(--f-mono)">PRIME TIME 08–17</text>
+      <g class="axis">
+        ${ticks.map((t) => html`<g key=${t}><line class="gridline" x1=${m.l} x2=${m.l + iw} y1=${y(t)} y2=${y(t)} /><text x=${m.l - 8} y=${y(t) + 4} text-anchor="end">${fmt0(t)}</text></g>`)}
+        ${[0, 6, 12, 18, 23].map((h) => html`<text key=${h} x=${x(h)} y=${H - 6} text-anchor="middle">${String(h).padStart(2, "0")}</text>`)}
+      </g>
+      <path d=${path(base)} fill="none" stroke="var(--fg-3)" stroke-width="2" stroke-dasharray="5 4" />
+      <path d=${path(cur)} fill="none" stroke="var(--series)" stroke-width="2" />
+      <text x=${x(23) + 6} y=${yb + 4 + off[0]} font-size="11" fill="var(--fg-2)">Baseline</text>
+      <text x=${x(23) + 6} y=${yc + 4 + off[1]} font-size="11" fill="var(--fg)">Window</text>
+      ${hover != null && html`<g><line x1=${x(hover)} x2=${x(hover)} y1=${m.t} y2=${m.t + ih} stroke="var(--fg-3)" />
+        <circle cx=${x(hover)} cy=${y(cur[hover])} r="4" fill="var(--series)" stroke="var(--surface)" stroke-width="2" />
+        <circle cx=${x(hover)} cy=${y(base[hover])} r="3.5" fill="var(--fg-3)" stroke="var(--surface)" stroke-width="2" /></g>`}
+      <rect x=${m.l} y=${m.t} width=${iw} height=${ih} fill="transparent" />
+    </svg>
+    ${hover != null && html`<div class="tip" style=${{ left: Math.min(x(hover) + 12, width - 180), top: 20 }}>
+      <div class="mono" style=${{ fontWeight: 600, marginBottom: 4 }}>${String(hover).padStart(2, "0")}:00–${String(hover).padStart(2, "0")}:59</div>
+      <div class="row"><span>Window</span><b>${fmt0(cur[hover])}</b></div>
+      <div class="row"><span>Baseline</span><span>${fmt0(base[hover])}</span></div>
+      <div class="row muted"><span>Change</span><span>${pct(cur[hover] / base[hover] - 1)}</span></div>
+    </div>`}
+  </div>`;
+}
+
+function MiniBar({ x, scale = 0.5 }) {
+  const w = Math.min(Math.abs(x) / scale, 1) * 50;
+  return html`<span class="mini-track" aria-hidden="true"><span class="zero"></span>
+    <span class="bar" style=${{ left: x >= 0 ? "50%" : `${50 - w}%`, width: `${Math.max(w, 0.8)}%`, background: x >= 0 ? "var(--up)" : "var(--down)" }}></span></span>`;
+}
+
+/* ======================================================================
+   Views
+   ====================================================================== */
+
+function Seg({ value, options, onChange, label }) {
+  return html`<span role="group" aria-label=${label} style=${{ display: "inline-flex", alignItems: "center" }}>
+    <span class="field-label">${label}</span>
+    <span class="seg">${options.map(([v, l]) => html`<button key=${v} aria-pressed=${value === v} onClick=${() => onChange(v)}>${l}</button>`)}</span>
+  </span>`;
+}
+
+function SevPill({ sev, d }) {
+  const label = sev === "normal" ? "Normal" : sev === "critical" ? "Critical" : "Warning";
+  const arrow = sev === "normal" ? "" : d >= 0 ? "▲ " : "▼ ";
+  return html`<span class=${`pill ${sev}`}><i></i>${arrow}${label}</span>`;
+}
+
+function Triage({ mode, setMode, win, setWin, open }) {
+  const [show, setShow] = useState("flagged");
+  const [sort, setSort] = useState({ key: "abs", dir: -1 });
+  const [q, setQ] = useState("");
+  const rows = useMemo(() => APPS.map((a) => {
+    const dev = deviation(a, Number(win), mode);
+    const inv = investigate(a, win, mode);
+    const f = inv.findings[0];
+    const lead = a.sc && f.conf !== "Info" ? f.pattern : null;
+    return { a, dev, lead, leadTables: f.evidence };
+  }), [mode, win]);
+  const flagged = rows.filter((r) => r.dev.sev !== "normal" || Math.abs(r.dev.drift) >= 0.1);
+  let list = show === "flagged" ? flagged : rows;
+  if (q) list = rows.filter((r) => r.a.code.includes(q.toUpperCase()) || r.a.name.toLowerCase().includes(q.toLowerCase()));
+  const keyf = { abs: (r) => Math.abs(r.dev.d), mips: (r) => r.dev.cur, code: (r) => r.a.code, z: (r) => Math.abs(r.dev.z), drift: (r) => Math.abs(r.dev.drift) }[sort.key];
+  list = list.slice().sort((x, y) => (keyf(x) > keyf(y) ? 1 : -1) * sort.dir);
+  const crit = rows.filter((r) => r.dev.sev === "critical").length, warn = rows.filter((r) => r.dev.sev === "warning").length;
+  const drifting = rows.filter((r) => Math.abs(r.dev.drift) >= 0.1).length;
+  const flaggedMips = rows.filter((r) => r.dev.sev !== "normal").reduce((s, r) => s + (r.dev.cur - r.dev.base), 0);
+  const SortTh = ({ k, children, r }) => html`<th class=${r ? "r" : ""} aria-sort=${sort.key === k ? (sort.dir < 0 ? "descending" : "ascending") : "none"}>
+    <button onClick=${() => setSort({ key: k, dir: sort.key === k ? -sort.dir : -1 })}>${children}${sort.key === k ? (sort.dir < 0 ? " ↓" : " ↑") : ""}</button></th>`;
+  const onSearch = (e) => { e.preventDefault(); const hit = APPS.find((a) => a.code === q.toUpperCase()); if (hit) open(hit.code); };
+
+  return html`
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">CAP_GRP_MIPS_D · scored nightly for every app code</div>
+        <h1>Deviation triage</h1>
+        <p>Every app code compared with its baseline. Open a flagged app to see which tables explain the change.</p>
+      </div>
+      <form class="search" onSubmit=${onSearch} role="search">
+        <span class="muted" aria-hidden="true">⌕</span>
+        <label for="app-search" class="field-label" style=${{ position: "absolute", left: -9999 }}>Find app code</label>
+        <input id="app-search" placeholder="Find app code, e.g. CLMS" value=${q} onInput=${(e) => setQ(e.target.value)} />
+      </form>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><span class="eyebrow">Critical</span><span class="v">${crit}</span><span class="s">±15% or more vs baseline</span></div>
+      <div class="kpi"><span class="eyebrow">Warning</span><span class="v">${warn}</span><span class="s">±7% to 15%</span></div>
+      <div class="kpi"><span class="eyebrow">Trailing ≠ plan</span><span class="v">${drifting}</span><span class="s">Baseline ≥10% away from plan</span></div>
+      <div class="kpi"><span class="eyebrow">Net MIPS, flagged apps</span><span class="v">${signed0(flaggedMips)}</span><span class="s">Window average vs baseline</span></div>
+    </div>
+    <div class="panel">
+      <div class="panel-body" style=${{ display: "grid", gap: 12 }}>
+        <div class="toolbar">
+          <${Seg} label="Baseline" value=${mode} onChange=${setMode} options=${[["trailing", "Trailing 20d"], ["plan", "Plan"]]} />
+          <${Seg} label="Window" value=${win} onChange=${setWin} options=${[["5", "Last 5d"], ["10", "Last 10d"], ["20", "Last 20d"]]} />
+          <${Seg} label="Show" value=${show} onChange=${setShow} options=${[["flagged", `Flagged (${flagged.length})`], ["all", `All (${rows.length})`]]} />
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <${SortTh} k="code">App<//>
+              <th>Status</th>
+              <${SortTh} k="mips" r>Window avg<//>
+              <th class="r">Baseline</th>
+              <${SortTh} k="abs" r>Change<//>
+              <${SortTh} k="z" r>σ<//>
+              <th>Last 60 days</th>
+              <${SortTh} k="drift" r>Trailing vs plan<//>
+              <th>Likely cause</th>
+            </tr></thead>
+            <tbody>
+              ${list.map((r) => html`<tr key=${r.a.code} class="click" tabIndex="0" onClick=${() => open(r.a.code)} onKeyDown=${(e) => e.key === "Enter" && open(r.a.code)}>
+                <td><div class="app-code">${r.a.code}</div><div class="app-name">${r.a.name}</div></td>
+                <td><${SevPill} sev=${r.dev.sev} d=${r.dev.d} /></td>
+                <td class="r">${fmt0(r.dev.cur)}</td>
+                <td class="r muted">${fmt0(r.dev.base)}</td>
+                <td class="r"><b class=${r.dev.sev === "normal" ? "" : r.dev.d >= 0 ? "up" : "down"}>${pct(r.dev.d)}</b><div class="sub">${signed0(r.dev.cur - r.dev.base)} MIPS</div></td>
+                <td class="r fg2">${fmt1(r.dev.z)}</td>
+                <td><${Spark} values=${r.a.series.actual.slice(N - 60)} ws=${60 - Number(win)} sev=${r.dev.sev} /></td>
+                <td class="r">${Math.abs(r.dev.drift) >= 0.1 ? html`<span class="pill drift">${pct(r.dev.drift, 0)}</span>` : html`<span class="muted">${pct(r.dev.drift, 0)}</span>`}</td>
+                <td>${r.lead ? html`<span class="pattern">${r.lead}</span> <span class="chip">${T[r.leadTables[0]].short || r.leadTables[0]}</span>` : html`<span class="muted">—</span>`}</td>
+              </tr>`)}
+              ${list.length === 0 && html`<tr><td colspan="9" class="muted">No app code matches “${q}”.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+        <div class="note">σ is the window average's distance from the baseline-period mean in daily standard deviations. "Likely cause" comes from the nightly drill-down that runs for every flagged app.</div>
+      </div>
+    </div>`;
+}
+
+function Investigate({ code, mode, setMode, back }) {
+  const app = APPS.find((a) => a.code === code);
+  const [preset, setPreset] = useState("auto");
+  const [view, setView] = useState("sc");
+  const [hl, setHl] = useState(null);
+  const [pending, setPending] = useState([]);
+  const first = useRef(true);
+  const inv = useMemo(() => investigate(app, preset, mode), [code, preset, mode]);
+  const { dev } = inv;
+
+  useEffect(() => { first.current = true; setPreset("auto"); setPending([]); }, [code]);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    const names = TABLES.map((t) => t.name).filter((n) => n !== "CAP_GRP_MIPS_D");
+    setPending(names);
+    let i = 0;
+    const id = setInterval(() => { i++; setPending(names.slice(i)); if (i >= names.length) clearInterval(id); }, 140);
+    return () => clearInterval(id);
+  }, [preset]);
+
+  const isPending = (n) => pending.includes(n);
+  const jump = (name) => { setHl(name); const el = document.getElementById(`row-${name}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); setTimeout(() => setHl(null), 1800); };
+
+  const rows = (view === "sc" ? inv.scRows : inv.asRows).map((r) => ({ ...r, d: r.cur - r.base })).sort((a, b) => Math.abs(b.d) - Math.abs(a.d)).slice(0, 8);
+  const maxD = Math.max(...rows.map((r) => Math.abs(r.d)), 1);
+  const explained = Math.abs(inv.dTrail) > dev.sd * 0.8 ? inv.spineDelta / inv.dTrail : null;
+  const drivers = inv.drivers.slice().sort((a, b) => (b.status === "ok") - (a.status === "ok") || Math.abs(b.impact || 0) - Math.abs(a.impact || 0));
+  const coverage = TABLES.map((t) => {
+    if (isPending(t.name)) return { t, st: "pending" };
+    if (t.grain === "month") return { t, st: "partial" };
+    if (t.role === "driver") { const d = inv.drivers.find((x) => x.t.name === t.name); return { t, st: d.status }; }
+    return { t, st: "ok" };
+  });
+  const nOk = coverage.filter((c) => c.st === "ok").length;
+  const mvTot = inv.movers.reduce((s, m) => s + Math.abs(m.cur - m.base), 0) || 1;
+
+  return html`
+    <div class="inv-head">
+      <div style=${{ display: "grid", gap: 6 }}>
+        <button class="back" onClick=${back}>← Triage</button>
+        <div class="inv-title"><h1>${app.code}</h1><span class="fg2">${app.name}</span><${SevPill} sev=${dev.sev} d=${dev.d} />
+          ${Math.abs(dev.drift) >= 0.1 && html`<span class="pill drift">Trailing ${pct(dev.drift, 0)} vs plan</span>`}</div>
+        <div class="compute-line">
+          ${pending.length ? html`<span class="dot-live run"></span><span>Running drill-down for this window · ${TABLES.length - 1 - pending.length} of ${TABLES.length - 1} tables done</span>`
+            : preset === "auto" ? html`<span class="dot-live"></span><span>From nightly run, Sat 3 Oct 02:14 · ${TABLES.length} tables</span>`
+            : html`<span class="dot-live"></span><span>Computed on demand just now · cached for 24h</span>`}
+        </div>
+      </div>
+      <div class="toolbar">
+        <${Seg} label="Baseline" value=${mode} onChange=${setMode} options=${[["trailing", "Trailing 20d"], ["plan", "Plan"]]} />
+        <${Seg} label="Window" value=${preset} onChange=${setPreset} options=${[["auto", app.start != null ? "Since change" : "Last 5d"], ...(app.start != null ? [["5", "5d"]] : []), ["10", "10d"], ["20", "20d"]]} />
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><span class="eyebrow">Window avg</span><span class="v">${fmt0(dev.cur)}</span><span class="s mono">${fmtDate(DATES[dev.ws])} – ${fmtDate(DATES[dev.we])} · ${inv.W} days</span></div>
+      <div class="kpi"><span class="eyebrow">${mode === "plan" ? "Plan" : "Baseline period"}</span><span class="v">${fmt0(dev.base)}</span><span class="s mono">${mode === "plan" ? "Monthly plan, same days" : `${fmtDate(DATES[dev.bs])} – ${fmtDate(DATES[dev.be])} · 20 days`}</span></div>
+      <div class="kpi"><span class="eyebrow">Change</span><span class=${`v ${dev.sev === "normal" ? "" : dev.d >= 0 ? "up" : "down"}`}>${signed0(dev.cur - dev.base)}</span><span class="s">${pct(dev.d)} · ${fmt1(dev.z)}σ vs baseline period</span></div>
+      <div class="kpi"><span class="eyebrow">Explained by CPU breakdown</span><span class="v">${explained == null ? "—" : `${Math.round(explained * 100)}%`}</span><span class="s">${explained == null ? "No material change to explain" : "MVSPM_WORKLOAD2_HV vs tracking table"}</span></div>
+    </div>
+
+    <section style=${{ display: "grid", gap: 10 }} aria-labelledby="f-h">
+      <div class="panel-head" style=${{ padding: 0 }}><h2 id="f-h">Findings</h2><p>Ranked by estimated MIPS impact. Each one links to the tables it came from.</p></div>
+      <div class="findings">
+        ${inv.findings.map((f, i) => html`<article key=${i} class=${`finding ${i === 0 && f.conf !== "Info" ? "top" : ""}`}>
+          <div class="rank">${i + 1}</div>
+          <div style=${{ minWidth: 0 }}>
+            <h3>${f.title}</h3>
+            <p>${f.body}</p>
+            <div class="meta">
+              <span class="pattern">${f.pattern}</span>
+              <span class="chip" title="Confidence">${f.conf === "Info" ? "Info" : `${f.conf} confidence`}</span>
+              ${f.evidence.map((e) => html`<button key=${e} class="chip" onClick=${() => jump(e)} title="Show in evidence">${e}</button>`)}
+            </div>
+          </div>
+          <div class="impact">${f.impact != null ? html`<span class=${`v ${f.impact >= 0 ? "up" : "down"}`}>${signed0(f.impact)}</span><span class="s">MIPS ${f.impactLabel || "est."}${f.sharePct ? ` · ${f.sharePct}% of change` : ""}</span>` : html`<span class="s">—</span>`}</div>
+        </article>`)}
+      </div>
+    </section>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div><h2>Daily MIPS</h2><p>CAP_GRP_MIPS_D · last 90 business days</p></div>
+        <div class="legend">
+          <span><i class="sw" style=${{ borderColor: "var(--series)" }}></i>Actual</span>
+          <span><i class="box" style=${{ background: "var(--series-weak)" }}></i>Trailing 20d ±2σ</span>
+          <span><i class="sw" style=${{ borderColor: "var(--fg-2)", borderTopStyle: "dashed" }}></i>Plan</span>
+        </div>
+      </div>
+      <div class="panel-body"><${TrendChart} app=${app} dev=${dev} mode=${mode} /></div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <div class="panel-head">
+          <div><h2>Where the CPU went</h2><p>Change in MIPS, window vs baseline period. These rows add up.</p></div>
+          <span class="seg"><button aria-pressed=${view === "sc"} onClick=${() => setView("sc")}>Service class</button><button aria-pressed=${view === "as"} onClick=${() => setView("as")}>Address space</button></span>
+        </div>
+        <div class="panel-body">
+          ${isPending(view === "sc" ? "MVSPM_WORKLOAD2_HV" : "MVS_ADDRSPACE_D") ? html`<span class="shimmer"></span>` : html`
+          <div class="decomp">
+            ${rows.map((r) => { const w = (Math.abs(r.d) / maxD) * 50; return html`<${React.Fragment} key=${r.name}>
+              <span class="name" title=${r.name}>${r.name}</span>
+              <span class="track" title=${`${fmt0(r.base)} → ${fmt0(r.cur)} MIPS`}><span class="zero"></span><span class="bar" style=${{ left: r.d >= 0 ? "50%" : `${50 - w}%`, width: `${Math.max(w, 0.6)}%`, background: r.d >= 0 ? "var(--up)" : "var(--down)" }}></span></span>
+              <span class="val">${signed0(r.d)}</span>
+            <//>`; })}
+          </div>`}
+          <div class="recon">
+            <span>Breakdown total <b>${signed0(inv.spineDelta)}</b></span>
+            <span>Tracking table <b>${signed0(inv.dTrail)}</b></span>
+            <span>Explained ${explained == null ? html`<b>—</b>` : html`<b>${Math.round(explained * 100)}%</b><span class="meter"><span style=${{ width: `${Math.min(100, Math.max(0, explained * 100))}%` }}></span></span>`}</span>
+          </div>
+          <div class="note">Source: ${view === "sc" ? "MVSPM_WORKLOAD2_HV (SMF 72.3)" : "MVS_ADDRSPACE_D (SMF 30)"}. The gap to 100% is CPU outside the app's service classes, or capture-ratio differences.</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><div><h2>When in the day</h2><p>Average MIPS by hour · MVSPM_WORKLOAD2_HV</p></div></div>
+        <div class="panel-body">${isPending("MVSPM_WORKLOAD2_HV") ? html`<span class="shimmer"></span>` : html`<${HourlyChart} base=${inv.hourly.base} cur=${inv.hourly.cur} />`}</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div><h2>What changed in the work</h2><p>Each workload table splits its CPU change into volume and cost per unit. Window vs baseline period${mode === "plan" ? "; these tables have no plan" : ""}.</p></div>
+      </div>
+      <div class="panel-body">
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Table</th><th class="r">Volume</th><th class="r">Cost per unit</th><th class="r">Est. MIPS</th><th>Pattern</th></tr></thead>
+          <tbody>
+            ${drivers.map((d) => html`<tr key=${d.t.name} id=${`row-${d.t.name}`} class=${hl === d.t.name ? "hl" : ""}>
+              <td><div class="mono" style=${{ fontWeight: 500 }}>${d.t.name}</div><div class="sub">${d.t.short} · SMF ${d.t.smf} · ${{ hour: "hourly", day: "daily", month: "monthly" }[d.t.grain]}</div></td>
+              ${isPending(d.t.name) ? html`<td class="r"><span class="shimmer"></span></td><td class="r"><span class="shimmer"></span></td><td></td><td></td>`
+              : d.status === "nodata" ? html`<td colspan="4" class="muted">No rows for ${app.code} in this table</td>`
+              : html`
+                <td class="r"><div class="delta-cell"><${MiniBar} x=${d.v} /><span class="n">${pct(d.v)}</span></div><div class="sub">${fmtK(d.vb)} → ${fmtK(d.vc)} ${d.t.vol}</div></td>
+                <td class="r"><div class="delta-cell"><${MiniBar} x=${d.u} /><span class="n">${pct(d.u)}</span></div><div class="sub">${fmtK(d.ub)} → ${fmtK(d.uc)} ${d.t.unit}</div></td>
+                <td class="r"><b class=${Math.abs(d.impact) < 5 ? "" : d.impact >= 0 ? "up" : "down"}>${signed0(d.impact)}</b></td>
+                <td><span class="pattern">${classify(d.v, d.u)}</span></td>`}
+            </tr>`)}
+          </tbody>
+        </table></div>
+        <div class="note">These tables are different views of CPU already counted in the breakdown above, so the estimated MIPS overlap and are never added together. Bars are scaled to ±50%.</div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <div class="panel-head"><div><h2>Top movers</h2><p>Transactions, packages, jobs and queues, by change in CPU sec/day</p></div></div>
+        <div class="panel-body"><div class="tbl-wrap"><table>
+          <thead><tr><th>Item</th><th>Table</th><th class="r">Baseline</th><th class="r">Window</th><th class="r">Change</th></tr></thead>
+          <tbody>${inv.movers.slice().sort((a, b) => Math.abs(b.cur - b.base) - Math.abs(a.cur - a.base)).map((m) => html`<tr key=${m.item}>
+            <td><span class="mono" style=${{ fontWeight: 500 }}>${m.item}</span>${m.isNew && html`<span class="new-badge">NEW</span>`}</td>
+            <td><button class="chip" onClick=${() => jump(m.table)}>${T[m.table].short}</button></td>
+            <td class="r muted">${m.isNew ? "—" : fmt0(m.base)}</td>
+            <td class="r">${fmt0(m.cur)}</td>
+            <td class="r"><b class=${Math.abs(m.cur - m.base) / mvTot < 0.05 ? "" : m.cur >= m.base ? "up" : "down"}>${signed0(m.cur - m.base)}</b></td>
+          </tr>`)}</tbody>
+        </table></div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><div><h2>Data coverage</h2><p>${nOk} of ${TABLES.length} tables have usable rows for ${app.code} in this window</p></div></div>
+        <div class="panel-body" style=${{ display: "grid", gap: 12 }}>
+          <div class="coverage">${coverage.map((c) => html`<span key=${c.t.name} class=${`cov ${c.st}`} title=${c.t.measures}><i></i>${c.t.name}</span>`)}</div>
+          <div class="legend">
+            <span><span class="cov ok" style=${{ border: 0, padding: 0 }}><i></i></span>Rows found</span>
+            <span><span class="cov partial" style=${{ border: 0, padding: 0 }}><i></i></span>Grain too coarse for this window</span>
+            <span><span class="cov nodata" style=${{ border: 0, padding: 0 }}><i></i></span>No rows for this app code</span>
+          </div>
+          <div class="note" style=${{ marginTop: 0 }}>A missing table is shown, never silently dropped. A finding with no supporting table loses confidence instead of disappearing.</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function Sources() {
+  const roleText = { tracking: "Tracking", breakdown: "CPU breakdown", driver: "Workload driver" };
+  return html`
+    <div class="page-head"><div><div class="eyebrow">Table registry</div><h1>Connected tables</h1>
+      <p>Every table joins on app code. Its role decides where it appears and whether its numbers may be added up. Adding a table means adding one registry entry; the investigation page picks it up without UI changes.</p></div></div>
+    <div class="role-legend">
+      <div class="panel panel-body"><h3>Tracking</h3><p class="fg2" style=${{ margin: "4px 0 0" }}>One table. Scored nightly for every app; drives triage and the headline change.</p></div>
+      <div class="panel panel-body"><h3>CPU breakdown</h3><p class="fg2" style=${{ margin: "4px 0 0" }}>Each one counts the app's CPU once, so rows inside it add up and reconcile to tracking.</p></div>
+      <div class="panel panel-body"><h3>Workload driver</h3><p class="fg2" style=${{ margin: "4px 0 0" }}>Views of CPU that is already counted. Used to explain volume vs cost per unit; never summed.</p></div>
+    </div>
+    <div class="panel"><div class="panel-body"><div class="tbl-wrap"><table>
+      <thead><tr><th>Table</th><th>Role</th><th>Grain</th><th>SMF</th><th>Measures</th><th>Status</th></tr></thead>
+      <tbody>${TABLES.map((t) => html`<tr key=${t.name}>
+        <td class="mono" style=${{ fontWeight: 500 }}>${t.name}</td>
+        <td>${roleText[t.role]}</td><td>${t.grain}</td><td class="mono">${t.smf}</td>
+        <td class="fg2">${t.measures}</td>
+        <td>${t.repo ? html`<span class="pill normal"><i></i>In CapPlan catalogue</span>` : html`<span class="pill drift">Example, confirm with SMEs</span>`}</td>
+      </tr>`)}</tbody>
+    </table></div></div></div>
+    <div class="panel">
+      <div class="panel-head"><div><h2>Adding a table</h2><p>One YAML entry per table. The backend builds the comparison SQL from it.</p></div></div>
+      <div class="panel-body"><pre class="code">${`- name: DB2_PACKAGE_H
+  role: driver                # tracking | breakdown | driver
+  grain: hour                 # hour | day | month
+  app_key: APPL_CODE          # every table joins on app code
+  item_key: PACKAGE_NAME      # what "top movers" lists
+  time_key: DATE, HOUR
+  volume: { column: SQL_CALLS,      label: "SQL calls/day" }
+  cpu:    { column: CLASS2_CPU_SEC, label: "CPU sec" }   # cost per unit = cpu / volume
+  extras:
+    - { column: GETPAGES, per: volume, label: "Getpages / call" }
+  maps_to_service_class: DB2DDF   # for the reconciliation hint`}</pre></div>
+    </div>`;
+}
+
+function Notes() {
+  return html`
+    <div class="page-head"><div><div class="eyebrow">Design notes</div><h1>How the workbench is built</h1>
+      <p>The layout and compute choices behind this mockup, and why.</p></div></div>
+    <div class="doc">
+      <div class="panel"><div class="panel-head"><h2>Analyst flow</h2></div><div class="panel-body">
+        <div class="flow">
+          <div><b>1 · Triage</b><span>Every app code scored on CAP_GRP_MIPS_D against trailing or plan. Ranked by change.</span></div>
+          <div><b>2 · Findings</b><span>Opening an app shows the ranked causes first, each with impact and source tables.</span></div>
+          <div><b>3 · Evidence</b><span>Where the CPU went (adds up), when in the day, and volume vs cost per unit per table.</span></div>
+          <div><b>4 · Items</b><span>The transactions, packages and jobs that moved, with new items flagged.</span></div>
+        </div>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Should it run every calculation?</h2></div><div class="panel-body">
+        <p>Not on every table for every app every time. The table list will grow, so cost has to grow with the number of flagged apps, not apps × tables. The plan is hybrid:</p>
+        <ol>
+          <li><strong>Nightly, all apps, one table.</strong> Score every app code on CAP_GRP_MIPS_D for both baselines. One aggregate query; it feeds triage.</li>
+          <li><strong>Nightly, flagged apps, all tables.</strong> For each flagged or drifting app, run every registered table's standard comparison (since change, or last 5 days, vs the 20 business days before). Store the results; the investigation page opens instantly.</li>
+          <li><strong>On demand, any app, any window.</strong> Changing the window starts a job. Tables run in parallel and each result appears as it finishes; the page never waits for the slowest table. Results are cached by app, table and window.</li>
+        </ol>
+        <p>All comparisons push the aggregation into Db2: <span class="mono">GROUP BY app, item, period</span> with the window and baseline as parameters. Only summary rows cross the network.</p>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Rules the layout enforces</h2></div><div class="panel-body">
+        <ul>
+          <li><strong>Never add driver tables together.</strong> CICS, IMS, WAS, Db2 and job tables count the same CPU from different angles. Only a breakdown table's rows are summed, and its total is reconciled against tracking.</li>
+          <li><strong>Plan applies only to the tracking table.</strong> Workload tables have no plan, so they always compare against the baseline period from real data.</li>
+          <li><strong>Volume vs cost per unit is the core split.</strong> More transactions at the same cost is demand. The same transactions costing more is a regression. New items not seen in the baseline period are new work.</li>
+          <li><strong>Missing data is visible.</strong> Each table reports rows found, grain too coarse, or no rows for this app.</li>
+        </ul>
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>FastAPI surface</h2></div><div class="panel-body">
+        <pre class="code">${`GET  /api/tables                                   registry (drives Sources + evidence rows)
+GET  /api/triage?baseline=trailing|plan&window=5   nightly scores, all apps
+GET  /api/apps/{code}/summary?window=&baseline=     KPIs + daily series
+POST /api/apps/{code}/runs  {window, baseline}      start on-demand drill-down -> run_id
+GET  /api/runs/{run_id}/events                      SSE: one event per table as it finishes
+GET  /api/apps/{code}/findings?run_id=              ranked findings from all table results`}</pre>
+      </div></div>
+    </div>`;
+}
+
+function App() {
+  const initial = (() => { const h = location.hash.slice(1); if (h.startsWith("app-")) return { page: "inv", code: h.slice(4).toUpperCase() }; if (["sources", "notes"].includes(h)) return { page: h }; return { page: "triage" }; })();
+  const [page, setPage] = useState(APPS.some((a) => a.code === initial.code) || initial.page !== "inv" ? initial.page : "triage");
+  const [code, setCode] = useState(initial.code && APPS.some((a) => a.code === initial.code) ? initial.code : "CLMS");
+  const [mode, setMode] = useState("trailing");
+  const [win, setWin] = useState("5");
+  const go = (p, c) => { setPage(p); if (c) setCode(c); try { history.replaceState(null, "", "#" + (p === "inv" ? `app-${c || code}` : p)); } catch (e) {} window.scrollTo(0, 0); };
+  const flaggedCount = useMemo(() => APPS.filter((a) => deviation(a, Number(win), mode).sev !== "normal").length, [mode, win]);
+  return html`<div class="shell">
+    <nav class="rail" aria-label="Main">
+      <div class="brand">MIPS Deviation Workbench<small>SMF ROOT-CAUSE · PRIME TIME</small></div>
+      <div class="nav">
+        <button aria-current=${page === "triage" ? "page" : undefined} onClick=${() => go("triage")}>Triage <span class="count">${flaggedCount}</span></button>
+        <button aria-current=${page === "inv" ? "page" : undefined} onClick=${() => go("inv", code)}>Investigate <span class="mono muted" style=${{ fontSize: 11 }}>${code}</span></button>
+        <button aria-current=${page === "sources" ? "page" : undefined} onClick=${() => go("sources")}>Tables</button>
+        <button aria-current=${page === "notes" ? "page" : undefined} onClick=${() => go("notes")}>Design notes</button>
+      </div>
+      <div class="rail-foot">
+        <span>Nightly run <b>Sat 3 Oct 02:14</b></span>
+        <span>Data through <b>Fri 2 Oct 2026</b></span>
+        <span><b>${APPS.length}</b> app codes · <b>${TABLES.length}</b> tables</span>
+      </div>
+    </nav>
+    <main>
+      <div class="sample-banner"><b>Sample data.</b> Synthetic numbers for layout review. App codes, items and the four tables marked "Example" are invented.</div>
+      ${page === "triage" && html`<${Triage} mode=${mode} setMode=${setMode} win=${win} setWin=${setWin} open=${(c) => go("inv", c)} />`}
+      ${page === "inv" && html`<${Investigate} key=${code} code=${code} mode=${mode} setMode=${setMode} back=${() => go("triage")} />`}
+      ${page === "sources" && html`<${Sources} />`}
+      ${page === "notes" && html`<${Notes} />`}
+    </main>
+  </div>`;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);
+</script>
