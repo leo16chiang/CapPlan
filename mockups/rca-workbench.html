@@ -4,13 +4,13 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500;600&display=swap">
 <style>
 /* Layout: operator console. Dark-blue left rail on white; summary -> findings -> evidence, top to bottom.
-   Palette: brand blue #006ac3 + white. Type: Roboto, Arial, Helvetica, sans-serif. */
+   Palette: white surfaces throughout, brand blue #006ac3 as the accent. Type: Roboto, Arial, Helvetica, sans-serif. */
 :root {
-  --brand: #006ac3;
-  --on-brand: #ffffff;
-  --on-brand-2: rgba(255, 255, 255, 0.72);
-  --brand-hover: rgba(255, 255, 255, 0.08);
-  --brand-active: rgba(255, 255, 255, 0.14);
+  --brand: #ffffff;
+  --on-brand: #0b1a2e;
+  --on-brand-2: #44536a;
+  --brand-hover: #f1f4f8;
+  --brand-active: #e1eefa;
   --bg: #ffffff;
   --surface: #ffffff;
   --surface-2: #f1f4f8;
@@ -37,7 +37,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --brand: #003b6e; --on-brand: #ffffff; --on-brand-2: rgba(255,255,255,0.7); --brand-hover: rgba(255,255,255,0.07); --brand-active: rgba(255,255,255,0.13);
+    --brand: #061a31; --on-brand: #eef3f9; --on-brand-2: #b3c1d4; --brand-hover: #0c2541; --brand-active: #0f2d52;
     --bg: #00101f; --surface: #061a31; --surface-2: #0c2541; --line: #1b3555;
     --fg: #eef3f9; --fg-2: #b3c1d4; --fg-3: #8495ac;
     --accent: #5aaef2; --accent-weak: #0f2d52;
@@ -48,7 +48,7 @@
   }
 }
 :root[data-theme="dark"] {
-  --brand: #003b6e; --on-brand: #ffffff; --on-brand-2: rgba(255,255,255,0.7); --brand-hover: rgba(255,255,255,0.07); --brand-active: rgba(255,255,255,0.13);
+  --brand: #061a31; --on-brand: #eef3f9; --on-brand-2: #b3c1d4; --brand-hover: #0c2541; --brand-active: #0f2d52;
   --bg: #00101f; --surface: #061a31; --surface-2: #0c2541; --line: #1b3555;
   --fg: #eef3f9; --fg-2: #b3c1d4; --fg-3: #8495ac;
   --accent: #5aaef2; --accent-weak: #0f2d52;
@@ -67,14 +67,14 @@ button { font: inherit; color: inherit; }
 .fg2 { color: var(--fg-2); }
 
 .shell { display: grid; grid-template-columns: 212px minmax(0, 1fr); min-height: 100vh; }
-.rail { background: var(--brand); color: var(--on-brand); padding: 20px 14px; display: flex; flex-direction: column; gap: 24px; position: sticky; top: 0; height: 100vh; }
-.brand { font-family: var(--f-display); font-weight: 700; font-size: 17px; line-height: 1.15; color: var(--on-brand); }
+.rail { background: var(--brand); color: var(--on-brand); border-right: 1px solid var(--line); padding: 20px 14px; display: flex; flex-direction: column; gap: 24px; position: sticky; top: 0; height: 100vh; }
+.brand { font-family: var(--f-display); font-weight: 700; font-size: 17px; line-height: 1.15; color: var(--accent); }
 .brand small { display: block; font-family: var(--f-mono); font-weight: 400; font-size: 11px; color: var(--on-brand-2); letter-spacing: 0.04em; margin-top: 4px; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav button { all: unset; cursor: pointer; padding: 8px 10px; border-radius: 4px; color: var(--on-brand-2); font-weight: 500; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .nav button:hover { background: var(--brand-hover); color: var(--on-brand); }
-.nav button[aria-current="page"] { background: var(--brand-active); color: var(--on-brand); box-shadow: inset 3px 0 0 var(--on-brand); }
-.nav button:focus-visible { outline: 2px solid var(--on-brand); }
+.nav button[aria-current="page"] { background: var(--brand-active); color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.nav button:focus-visible { outline: 2px solid var(--accent); }
 .nav .muted { color: var(--on-brand-2); }
 .nav .count { font-family: var(--f-mono); font-size: 11px; background: var(--critical); color: #fff; border-radius: 9px; padding: 0 6px; }
 .rail-foot { margin-top: auto; font-size: 12px; color: var(--on-brand-2); display: grid; gap: 4px; }
@@ -225,7 +225,7 @@ pre.code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; backg
 }
 @media (max-width: 860px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
-  .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 16px; gap: 10px 18px; }
+  .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 16px; gap: 10px 18px; border-right: 0; border-bottom: 1px solid var(--line); }
   .nav { flex-direction: row; flex-wrap: wrap; }
   .rail-foot { display: none; }
   main { padding-inline: 16px; }
