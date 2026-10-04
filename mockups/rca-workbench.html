@@ -1,21 +1,27 @@
 <title>MIPS Deviation Workbench</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500;600&display=swap">
 <style>
-/* Layout: operator console. Left rail nav, then summary -> findings -> evidence, top to bottom. */
+/* Layout: operator console. Dark-blue left rail on white; summary -> findings -> evidence, top to bottom.
+   Palette: brand blue #006ac3 + white. Type: Roboto, Arial, Helvetica, sans-serif. */
 :root {
-  --bg: #f4f6f9;
+  --brand: #006ac3;
+  --on-brand: #ffffff;
+  --on-brand-2: rgba(255, 255, 255, 0.72);
+  --brand-hover: rgba(255, 255, 255, 0.08);
+  --brand-active: rgba(255, 255, 255, 0.14);
+  --bg: #ffffff;
   --surface: #ffffff;
-  --surface-2: #edf0f5;
-  --line: #d9dee7;
-  --fg: #121821;
-  --fg-2: #4a5364;
-  --fg-3: #788296;
-  --accent: #2e3fa3;
-  --accent-weak: #e4e7f8;
-  --series: #2a78d6;
-  --series-weak: #cde2fb;
+  --surface-2: #f1f4f8;
+  --line: #d8dfe8;
+  --fg: #0b1a2e;
+  --fg-2: #44536a;
+  --fg-3: #6b7a90;
+  --accent: #006ac3;
+  --accent-weak: #e1eefa;
+  --series: #006ac3;
+  --series-weak: #cde3f6;
   --up: #e34948;
   --down: #2a78d6;
   --good: #0ca30c;
@@ -23,30 +29,32 @@
   --serious: #ec835a;
   --critical: #d03b3b;
   --win: rgba(227, 73, 72, 0.07);
-  --basewin: rgba(46, 63, 163, 0.06);
-  --shadow: 0 1px 2px rgba(18, 24, 33, 0.06);
-  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
-  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --basewin: rgba(0, 106, 195, 0.07);
+  --shadow: 0 1px 2px rgba(0, 53, 98, 0.06);
+  --f-display: Roboto, Arial, Helvetica, sans-serif;
+  --f-body: Roboto, Arial, Helvetica, sans-serif;
+  --f-mono: "Roboto Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0e1116; --surface: #161a21; --surface-2: #1e232c; --line: #2a303b;
-    --fg: #eef1f5; --fg-2: #b2b9c6; --fg-3: #808999;
-    --accent: #9aa5ff; --accent-weak: #262c4d;
-    --series: #3987e5; --series-weak: #1c3557;
+    --brand: #003b6e; --on-brand: #ffffff; --on-brand-2: rgba(255,255,255,0.7); --brand-hover: rgba(255,255,255,0.07); --brand-active: rgba(255,255,255,0.13);
+    --bg: #00101f; --surface: #061a31; --surface-2: #0c2541; --line: #1b3555;
+    --fg: #eef3f9; --fg-2: #b3c1d4; --fg-3: #8495ac;
+    --accent: #5aaef2; --accent-weak: #0f2d52;
+    --series: #3d9be9; --series-weak: #12345e;
     --up: #e66767; --down: #3987e5;
-    --win: rgba(230, 103, 103, 0.10); --basewin: rgba(154, 165, 255, 0.08);
+    --win: rgba(230, 103, 103, 0.10); --basewin: rgba(90, 166, 240, 0.08);
     --shadow: none; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0e1116; --surface: #161a21; --surface-2: #1e232c; --line: #2a303b;
-  --fg: #eef1f5; --fg-2: #b2b9c6; --fg-3: #808999;
-  --accent: #9aa5ff; --accent-weak: #262c4d;
-  --series: #3987e5; --series-weak: #1c3557;
+  --brand: #003b6e; --on-brand: #ffffff; --on-brand-2: rgba(255,255,255,0.7); --brand-hover: rgba(255,255,255,0.07); --brand-active: rgba(255,255,255,0.13);
+  --bg: #00101f; --surface: #061a31; --surface-2: #0c2541; --line: #1b3555;
+  --fg: #eef3f9; --fg-2: #b3c1d4; --fg-3: #8495ac;
+  --accent: #5aaef2; --accent-weak: #0f2d52;
+  --series: #3d9be9; --series-weak: #12345e;
   --up: #e66767; --down: #3987e5;
-  --win: rgba(230, 103, 103, 0.10); --basewin: rgba(154, 165, 255, 0.08);
+  --win: rgba(230, 103, 103, 0.10); --basewin: rgba(90, 166, 240, 0.08);
   --shadow: none; color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -59,17 +67,18 @@ button { font: inherit; color: inherit; }
 .fg2 { color: var(--fg-2); }
 
 .shell { display: grid; grid-template-columns: 212px minmax(0, 1fr); min-height: 100vh; }
-.rail { background: var(--surface); border-right: 1px solid var(--line); padding: 20px 14px; display: flex; flex-direction: column; gap: 24px; position: sticky; top: 0; height: 100vh; }
-.brand { font-family: var(--f-display); font-weight: 700; font-size: 17px; letter-spacing: 0.01em; line-height: 1.15; }
-.brand small { display: block; font-family: var(--f-mono); font-weight: 400; font-size: 11px; color: var(--fg-3); letter-spacing: 0.04em; margin-top: 4px; }
+.rail { background: var(--brand); color: var(--on-brand); padding: 20px 14px; display: flex; flex-direction: column; gap: 24px; position: sticky; top: 0; height: 100vh; }
+.brand { font-family: var(--f-display); font-weight: 700; font-size: 17px; line-height: 1.15; color: var(--on-brand); }
+.brand small { display: block; font-family: var(--f-mono); font-weight: 400; font-size: 11px; color: var(--on-brand-2); letter-spacing: 0.04em; margin-top: 4px; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
-.nav button { all: unset; cursor: pointer; padding: 8px 10px; border-radius: 6px; color: var(--fg-2); font-weight: 500; display: flex; justify-content: space-between; align-items: center; }
-.nav button:hover { background: var(--surface-2); color: var(--fg); }
-.nav button[aria-current="page"] { background: var(--accent-weak); color: var(--accent); }
-.nav button:focus-visible { outline: 2px solid var(--accent); }
+.nav button { all: unset; cursor: pointer; padding: 8px 10px; border-radius: 4px; color: var(--on-brand-2); font-weight: 500; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.nav button:hover { background: var(--brand-hover); color: var(--on-brand); }
+.nav button[aria-current="page"] { background: var(--brand-active); color: var(--on-brand); box-shadow: inset 3px 0 0 var(--on-brand); }
+.nav button:focus-visible { outline: 2px solid var(--on-brand); }
+.nav .muted { color: var(--on-brand-2); }
 .nav .count { font-family: var(--f-mono); font-size: 11px; background: var(--critical); color: #fff; border-radius: 9px; padding: 0 6px; }
-.rail-foot { margin-top: auto; font-size: 12px; color: var(--fg-3); display: grid; gap: 4px; }
-.rail-foot b { color: var(--fg-2); font-weight: 500; }
+.rail-foot { margin-top: auto; font-size: 12px; color: var(--on-brand-2); display: grid; gap: 4px; }
+.rail-foot b { color: var(--on-brand); font-weight: 500; }
 
 main { padding-inline: 28px; padding-block: 20px 48px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
 .sample-banner { font-size: 12px; color: var(--fg-2); background: var(--surface-2); border: 1px dashed var(--line); border-radius: 6px; padding: 6px 10px; }
@@ -216,7 +225,7 @@ pre.code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; backg
 }
 @media (max-width: 860px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
-  .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 16px; gap: 10px 18px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .rail { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 16px; gap: 10px 18px; }
   .nav { flex-direction: row; flex-wrap: wrap; }
   .rail-foot { display: none; }
   main { padding-inline: 16px; }
@@ -259,8 +268,11 @@ function gauss(r) { const u = Math.max(r(), 1e-9), v = r(); return Math.sqrt(-2 
 const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
 const std = (a) => { const m = mean(a); return Math.sqrt(mean(a.map((x) => (x - m) ** 2))); };
 
-// 120 business days ending Friday 2 Oct 2026
-const N = 120, BASE_DAYS = 20;
+// 420 business days ending Friday 2 Oct 2026: room for a 6-month window plus a 6-month baseline
+const N = 420;
+const PERIODS = { "1w": 5, "1m": 21, "6m": 126 };
+const PERIOD_LABEL = { "1w": "1 week", "1m": "1 month", "6m": "6 months" };
+const PERIOD_OPTS = [["1w", "1 week"], ["1m", "1 month"], ["6m", "6 months"]];
 const DATES = (() => {
   const out = []; const d = new Date(Date.UTC(2026, 9, 2));
   while (out.length < N) { const w = d.getUTCDay(); if (w !== 0 && w !== 6) out.unshift(new Date(d)); d.setUTCDate(d.getUTCDate() - 1); }
@@ -299,7 +311,7 @@ const APPS = [
   { code: "CLMS", name: "Claims adjudication", b: 620, sc: "efficiency", start: N - 7, mag: 0.27, shares: { CICSPROD: .5, DB2DDF: .2, WASPROD: .12, BATPROD: .1, STCMED: .08 } },
   { code: "WIRE", name: "Wire transfers", b: 410, sc: "volume", start: N - 6, mag: 0.22, shares: { WASPROD: .35, CICSPROD: .3, DB2DDF: .2, BATPROD: .05, STCMED: .1 } },
   { code: "STMT", name: "Customer statements", b: 280, sc: "newwork", start: N - 4, mag: 0.19, shares: { BATPROD: .45, CICSPROD: .2, DB2DDF: .2, STCMED: .15 } },
-  { code: "FRAD", name: "Fraud scoring", b: 300, sc: "drift", growth: 0.0019, shares: { WASPROD: .3, DB2DDF: .3, CICSPROD: .25, STCMED: .15 } },
+  { code: "FRAD", name: "Fraud scoring", b: 300, sc: "drift", growth: 0.0008, shares: { WASPROD: .3, DB2DDF: .3, CICSPROD: .25, STCMED: .15 } },
   { code: "PAYX", name: "Payroll exchange", b: 300, sc: "drop", start: N - 5, mag: 0.14, shares: { IMSPROD: .55, BATPROD: .2, DB2DDF: .15, STCMED: .1 } },
   { code: "CUST", name: "Customer profile", b: 520, sc: "volume", start: N - 5, mag: 0.085, mild: true, shares: { CICSPROD: .45, DB2DDF: .25, WASPROD: .15, STCMED: .15 } },
   { code: "ACCT", name: "Account master", b: 890 }, { code: "CRDT", name: "Card authorisation", b: 760 },
@@ -338,40 +350,42 @@ function genSeries(a) {
       v *= 1 + (a.sc === "drop" ? -1 : 1) * a.mag * ramp;
     }
     actual.push(v);
-    const pg = a.sc === "drift" ? 0.0003 : g;
+    const pg = a.sc === "drift" ? 0.0001 : g;
     plan.push(a.b * (1 + pg * (monthStart + 10)) * planOff);
   }
+  return { actual, plan, roll: {} };
+}
+
+// Trailing mean and SD over the previous L business days, cached per baseline length.
+function rolling(app, L) {
+  const s = app.series;
+  if (s.roll[L]) return s.roll[L];
   const tm = [], tsd = [];
   for (let t = 0; t < N; t++) {
-    if (t < BASE_DAYS) { tm.push(null); tsd.push(null); continue; }
-    const w = actual.slice(t - BASE_DAYS, t); tm.push(mean(w)); tsd.push(std(w));
+    if (t < L) { tm.push(null); tsd.push(null); continue; }
+    const w = s.actual.slice(t - L, t); tm.push(mean(w)); tsd.push(std(w));
   }
-  return { actual, plan, tm, tsd };
+  return (s.roll[L] = { tm, tsd });
 }
 
-function windowLen(app, preset) {
-  if (preset === "auto") return app.start != null ? Math.max(3, N - app.start) : 5;
-  return Number(preset);
-}
-
-function deviation(app, W, mode) {
-  const s = app.series, ws = N - W;
+function deviation(app, win, baseKey, mode) {
+  const s = app.series, W = PERIODS[win], L = PERIODS[baseKey], ws = N - W;
   const cur = mean(s.actual.slice(ws));
-  const bw = s.actual.slice(ws - BASE_DAYS, ws);
+  const bw = s.actual.slice(ws - L, ws);
   const tm = mean(bw), sd = std(bw);
   const planAvg = mean(s.plan.slice(ws));
   const base = mode === "plan" ? planAvg : tm;
   const d = cur / base - 1;
-  const drift = tm / mean(s.plan.slice(ws - BASE_DAYS, ws)) - 1;
+  const drift = tm / mean(s.plan.slice(ws - L, ws)) - 1;
   const sev = Math.abs(d) >= 0.15 ? "critical" : Math.abs(d) >= 0.07 ? "warning" : "normal";
-  return { cur, base, tm, sd, planAvg, d, z: (cur - tm) / sd, drift, sev, ws, we: N - 1, bs: ws - BASE_DAYS, be: ws - 1 };
+  return { cur, base, tm, sd, planAvg, d, z: (cur - tm) / sd, drift, sev, W, L, ws, we: N - 1, bs: ws - L, be: ws - 1 };
 }
 
 // Fraction of the scenario visible in the window minus any that leaked into the baseline period.
 function intensity(app, dev) {
   if (app.start == null) return app.sc === "drift" ? 1 : 0;
   const inWin = Math.max(0, N - Math.max(app.start, dev.ws)) / (N - dev.ws);
-  const inBase = Math.max(0, dev.be + 1 - Math.max(app.start, dev.bs)) / BASE_DAYS;
+  const inBase = Math.max(0, dev.be + 1 - Math.max(app.start, dev.bs)) / dev.L;
   return Math.max(0, inWin - inBase);
 }
 
@@ -392,9 +406,10 @@ const MOVERS = {
   FRAD: [["/score/v3", "WAS_INT_SERVLETS_H", 1600, 1720], ["FRPK01", "DB2_PACKAGE_H", 900, 968], ["FR02", "CICS_TRANSACTIO_DP", 700, 744], ["FRAUD.EVT", "MQ_QUEUE_H", 180, 190]],
 };
 
-function investigate(app, preset, mode) {
-  const W = windowLen(app, preset);
-  const dev = deviation(app, W, mode);
+function investigate(app, win, base, mode) {
+  const preset = win + base;
+  const dev = deviation(app, win, base, mode);
+  const W = dev.W;
   const k = intensity(app, dev);
   const r = rng(hash(app.code + preset));
   const dTrail = dev.cur - dev.tm;          // breakdown always explains window vs baseline period
@@ -476,7 +491,7 @@ function buildFindings(app, dev, k, drivers, movers, dTrail, hb, hc) {
   const F = [];
   const share = (x) => (Math.abs(dTrail) > 1 ? Math.round((x / dTrail) * 100) : 0);
   if (app.sc && app.sc !== "drift" && k < 0.15) {
-    return [{ title: "The change isn't in this window", body: `The shift in ${app.code} began on ${sd}, which falls inside the baseline period for this window. Choose "Since change" or a shorter window.`, pattern: "Window", conf: "Info", impact: null, evidence: ["CAP_GRP_MIPS_D"] }];
+    return [{ title: "The change isn't in this window", body: `The shift in ${app.code} began on ${sd}, which falls inside the baseline period for these settings. Use a shorter window or a longer baseline.`, pattern: "Window", conf: "Info", impact: null, evidence: ["CAP_GRP_MIPS_D"] }];
   }
   if (app.sc === "efficiency") {
     const c = drv(drivers, "CICS"), d = drv(drivers, "Db2"), m = movers[0];
@@ -561,7 +576,9 @@ function Spark({ values, ws, sev }) {
 function TrendChart({ app, dev, mode }) {
   const [ref, width] = useWidth();
   const [hover, setHover] = useState(null);
-  const s = app.series, from = 30;
+  const { tm, tsd } = rolling(app, dev.L);
+  const s = { ...app.series, tm, tsd };
+  const from = Math.max(dev.L, Math.min(dev.bs - 5, N - 130));
   const H = 260, m = { l: 48, r: 14, t: 12, b: 26 };
   const iw = width - m.l - m.r, ih = H - m.t - m.b;
   const idx = []; for (let i = from; i < N; i++) idx.push(i);
@@ -573,7 +590,9 @@ function TrendChart({ app, dev, mode }) {
   const line = (arr) => idx.map((i, k) => `${k ? "L" : "M"}${x(i).toFixed(1)},${y(arr[i]).toFixed(1)}`).join("");
   const band = idx.map((i, k) => `${k ? "L" : "M"}${x(i).toFixed(1)},${y(s.tm[i] + 2 * s.tsd[i]).toFixed(1)}`).join("") +
     idx.slice().reverse().map((i) => `L${x(i).toFixed(1)},${y(s.tm[i] - 2 * s.tsd[i]).toFixed(1)}`).join("") + "Z";
-  const months = idx.filter((i) => i === from || DATES[i].getUTCMonth() !== DATES[i - 1].getUTCMonth()).filter((i) => i !== from);
+  const allMonths = idx.filter((i) => i !== from && DATES[i].getUTCMonth() !== DATES[i - 1].getUTCMonth());
+  const every = Math.max(1, Math.ceil(allMonths.length / Math.max(1, Math.floor(iw / 56))));
+  const months = allMonths.filter((_, k) => k % every === 0);
   const step = (x(from + 1) - x(from)) / 2;
   const onMove = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -583,15 +602,15 @@ function TrendChart({ app, dev, mode }) {
   };
   const planStrong = mode === "plan";
   return html`<div class="chart-wrap" ref=${ref}>
-    <svg width=${width} height=${H} role="img" aria-label=${`Daily MIPS for ${app.code}, last 90 business days, with trailing baseline band and plan`}
+    <svg width=${width} height=${H} role="img" aria-label=${`Daily MIPS for ${app.code} with trailing baseline band and plan`}
       onMouseMove=${onMove} onMouseLeave=${() => setHover(null)}>
       <rect x=${x(dev.bs) - step} y=${m.t} width=${x(dev.be) - x(dev.bs) + 2 * step} height=${ih} fill="var(--basewin)" />
       <rect x=${x(dev.ws) - step} y=${m.t} width=${x(dev.we) - x(dev.ws) + 2 * step} height=${ih} fill="var(--win)" />
-      <text x=${x(dev.bs) - step + 4} y=${m.t + 12} font-size="10.5" fill="var(--accent)" font-family="var(--f-mono)">BASELINE</text>
+      ${x(dev.be) - x(dev.bs) > 70 && html`<text x=${x(dev.bs) - step + 4} y=${m.t + 12} font-size="10.5" fill="var(--accent)" font-family="var(--f-mono)">BASELINE</text>`}
       <text x=${x(dev.we) + step - 4} y=${m.t + 12} font-size="10.5" fill="var(--up)" font-family="var(--f-mono)" text-anchor="end">WINDOW</text>
       <g class="axis">
         ${ticks.map((t) => html`<g key=${t}><line class="gridline" x1=${m.l} x2=${m.l + iw} y1=${y(t)} y2=${y(t)} /><text x=${m.l - 8} y=${y(t) + 4} text-anchor="end">${fmt0(t)}</text></g>`)}
-        ${months.map((i) => html`<text key=${i} x=${x(i)} y=${H - 6} text-anchor="middle">${MON[DATES[i].getUTCMonth()]}</text>`)}
+        ${months.map((i) => html`<text key=${i} x=${x(i)} y=${H - 6} text-anchor="middle">${MON[DATES[i].getUTCMonth()]}${DATES[i].getUTCMonth() === 0 ? ` ${String(DATES[i].getUTCFullYear()).slice(2)}` : ""}</text>`)}
       </g>
       <path d=${band} fill="var(--series-weak)" opacity=${planStrong ? 0.35 : 0.75} />
       <path d=${line(s.tm)} fill="none" stroke="var(--series)" stroke-width="1" stroke-dasharray="2 3" opacity="0.8" />
@@ -608,7 +627,7 @@ function TrendChart({ app, dev, mode }) {
     ${hover != null && html`<div class="tip" style=${{ left: Math.min(x(hover) + 12, width - 190), top: 18 }}>
       <div class="mono" style=${{ marginBottom: 4, fontWeight: 600 }}>${fmtDate(DATES[hover])} ${DATES[hover].getUTCFullYear()}</div>
       <div class="row"><span><i class="sw" style=${{ background: "var(--series)" }}></i>Actual</span><b>${fmt0(s.actual[hover])}</b></div>
-      <div class="row"><span><i class="sw" style=${{ background: "var(--series)", opacity: 0.5 }}></i>Trailing 20d</span><span>${fmt0(s.tm[hover])} ± ${fmt0(2 * s.tsd[hover])}</span></div>
+      <div class="row"><span><i class="sw" style=${{ background: "var(--series)", opacity: 0.5 }}></i>Trailing ${PERIOD_LABEL[{5:"1w",21:"1m",126:"6m"}[dev.L]]}</span><span>${fmt0(s.tm[hover])} ± ${fmt0(2 * s.tsd[hover])}</span></div>
       <div class="row"><span><i class="sw" style=${{ background: "var(--fg-2)" }}></i>Plan</span><span>${fmt0(s.plan[hover])}</span></div>
       <div class="row muted"><span>vs ${mode === "plan" ? "plan" : "trailing"}</span><span>${pct(s.actual[hover] / (mode === "plan" ? s.plan[hover] : s.tm[hover]) - 1)}</span></div>
     </div>`}
@@ -669,23 +688,31 @@ function Seg({ value, options, onChange, label }) {
   </span>`;
 }
 
+function PeriodControls({ mode, setMode, win, setWin, base, setBase }) {
+  return html`<${React.Fragment}>
+    <${Seg} label="Compare with" value=${mode} onChange=${setMode} options=${[["trailing", "Trailing average"], ["plan", "Plan"]]} />
+    <${Seg} label="Baseline" value=${base} onChange=${setBase} options=${PERIOD_OPTS} />
+    <${Seg} label="Window" value=${win} onChange=${setWin} options=${PERIOD_OPTS} />
+  <//>`;
+}
+
 function SevPill({ sev, d }) {
   const label = sev === "normal" ? "Normal" : sev === "critical" ? "Critical" : "Warning";
   const arrow = sev === "normal" ? "" : d >= 0 ? "▲ " : "▼ ";
   return html`<span class=${`pill ${sev}`}><i></i>${arrow}${label}</span>`;
 }
 
-function Triage({ mode, setMode, win, setWin, open }) {
+function Triage({ mode, setMode, win, setWin, base, setBase, open }) {
   const [show, setShow] = useState("flagged");
   const [sort, setSort] = useState({ key: "abs", dir: -1 });
   const [q, setQ] = useState("");
   const rows = useMemo(() => APPS.map((a) => {
-    const dev = deviation(a, Number(win), mode);
-    const inv = investigate(a, win, mode);
+    const dev = deviation(a, win, base, mode);
+    const inv = investigate(a, win, base, mode);
     const f = inv.findings[0];
     const lead = a.sc && f.conf !== "Info" ? f.pattern : null;
     return { a, dev, lead, leadTables: f.evidence };
-  }), [mode, win]);
+  }), [mode, win, base]);
   const flagged = rows.filter((r) => r.dev.sev !== "normal" || Math.abs(r.dev.drift) >= 0.1);
   let list = show === "flagged" ? flagged : rows;
   if (q) list = rows.filter((r) => r.a.code.includes(q.toUpperCase()) || r.a.name.toLowerCase().includes(q.toLowerCase()));
@@ -715,13 +742,12 @@ function Triage({ mode, setMode, win, setWin, open }) {
       <div class="kpi"><span class="eyebrow">Critical</span><span class="v">${crit}</span><span class="s">±15% or more vs baseline</span></div>
       <div class="kpi"><span class="eyebrow">Warning</span><span class="v">${warn}</span><span class="s">±7% to 15%</span></div>
       <div class="kpi"><span class="eyebrow">Trailing ≠ plan</span><span class="v">${drifting}</span><span class="s">Baseline ≥10% away from plan</span></div>
-      <div class="kpi"><span class="eyebrow">Net MIPS, flagged apps</span><span class="v">${signed0(flaggedMips)}</span><span class="s">Window average vs baseline</span></div>
+      <div class="kpi"><span class="eyebrow">Net MIPS, flagged apps</span><span class="v">${signed0(flaggedMips)}</span><span class="s">${PERIOD_LABEL[win]} window vs baseline</span></div>
     </div>
     <div class="panel">
       <div class="panel-body" style=${{ display: "grid", gap: 12 }}>
         <div class="toolbar">
-          <${Seg} label="Baseline" value=${mode} onChange=${setMode} options=${[["trailing", "Trailing 20d"], ["plan", "Plan"]]} />
-          <${Seg} label="Window" value=${win} onChange=${setWin} options=${[["5", "Last 5d"], ["10", "Last 10d"], ["20", "Last 20d"]]} />
+          <${PeriodControls} mode=${mode} setMode=${setMode} win=${win} setWin=${setWin} base=${base} setBase=${setBase} />
           <${Seg} label="Show" value=${show} onChange=${setShow} options=${[["flagged", `Flagged (${flagged.length})`], ["all", `All (${rows.length})`]]} />
         </div>
         <div class="tbl-wrap">
@@ -733,7 +759,7 @@ function Triage({ mode, setMode, win, setWin, open }) {
               <th class="r">Baseline</th>
               <${SortTh} k="abs" r>Change<//>
               <${SortTh} k="z" r>σ<//>
-              <th>Last 60 days</th>
+              <th>Last 6 months</th>
               <${SortTh} k="drift" r>Trailing vs plan<//>
               <th>Likely cause</th>
             </tr></thead>
@@ -745,7 +771,7 @@ function Triage({ mode, setMode, win, setWin, open }) {
                 <td class="r muted">${fmt0(r.dev.base)}</td>
                 <td class="r"><b class=${r.dev.sev === "normal" ? "" : r.dev.d >= 0 ? "up" : "down"}>${pct(r.dev.d)}</b><div class="sub">${signed0(r.dev.cur - r.dev.base)} MIPS</div></td>
                 <td class="r fg2">${fmt1(r.dev.z)}</td>
-                <td><${Spark} values=${r.a.series.actual.slice(N - 60)} ws=${60 - Number(win)} sev=${r.dev.sev} /></td>
+                <td><${Spark} values=${r.a.series.actual.slice(N - 130)} ws=${Math.max(0, 130 - PERIODS[win])} sev=${r.dev.sev} /></td>
                 <td class="r">${Math.abs(r.dev.drift) >= 0.1 ? html`<span class="pill drift">${pct(r.dev.drift, 0)}</span>` : html`<span class="muted">${pct(r.dev.drift, 0)}</span>`}</td>
                 <td>${r.lead ? html`<span class="pattern">${r.lead}</span> <span class="chip">${T[r.leadTables[0]].short || r.leadTables[0]}</span>` : html`<span class="muted">—</span>`}</td>
               </tr>`)}
@@ -753,30 +779,30 @@ function Triage({ mode, setMode, win, setWin, open }) {
             </tbody>
           </table>
         </div>
-        <div class="note">σ is the window average's distance from the baseline-period mean in daily standard deviations. "Likely cause" comes from the nightly drill-down that runs for every flagged app.</div>
+        <div class="note">σ is the window average's distance from the baseline-period mean in daily standard deviations. The baseline is the ${PERIOD_LABEL[base]} just before the window. With "Plan" selected, the change is measured against plan; σ and the drill-down still use the baseline period. "Likely cause" comes from the nightly drill-down that runs for every flagged app.</div>
       </div>
     </div>`;
 }
 
-function Investigate({ code, mode, setMode, back }) {
+function Investigate({ code, mode, setMode, win, setWin, base, setBase, back }) {
   const app = APPS.find((a) => a.code === code);
-  const [preset, setPreset] = useState("auto");
   const [view, setView] = useState("sc");
   const [hl, setHl] = useState(null);
   const [pending, setPending] = useState([]);
   const first = useRef(true);
-  const inv = useMemo(() => investigate(app, preset, mode), [code, preset, mode]);
+  const inv = useMemo(() => investigate(app, win, base, mode), [code, win, base, mode]);
+  const [fromNightly, setFromNightly] = useState(true);
   const { dev } = inv;
 
-  useEffect(() => { first.current = true; setPreset("auto"); setPending([]); }, [code]);
+  useEffect(() => { first.current = true; setPending([]); setFromNightly(true); }, [code]);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
     const names = TABLES.map((t) => t.name).filter((n) => n !== "CAP_GRP_MIPS_D");
-    setPending(names);
+    setPending(names); setFromNightly(false);
     let i = 0;
     const id = setInterval(() => { i++; setPending(names.slice(i)); if (i >= names.length) clearInterval(id); }, 140);
     return () => clearInterval(id);
-  }, [preset]);
+  }, [win, base, mode]);
 
   const isPending = (n) => pending.includes(n);
   const jump = (name) => { setHl(name); const el = document.getElementById(`row-${name}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); setTimeout(() => setHl(null), 1800); };
@@ -802,19 +828,18 @@ function Investigate({ code, mode, setMode, back }) {
           ${Math.abs(dev.drift) >= 0.1 && html`<span class="pill drift">Trailing ${pct(dev.drift, 0)} vs plan</span>`}</div>
         <div class="compute-line">
           ${pending.length ? html`<span class="dot-live run"></span><span>Running drill-down for this window · ${TABLES.length - 1 - pending.length} of ${TABLES.length - 1} tables done</span>`
-            : preset === "auto" ? html`<span class="dot-live"></span><span>From nightly run, Sat 3 Oct 02:14 · ${TABLES.length} tables</span>`
+            : fromNightly ? html`<span class="dot-live"></span><span>From nightly run, Sat 3 Oct 02:14 · ${TABLES.length} tables</span>`
             : html`<span class="dot-live"></span><span>Computed on demand just now · cached for 24h</span>`}
         </div>
       </div>
       <div class="toolbar">
-        <${Seg} label="Baseline" value=${mode} onChange=${setMode} options=${[["trailing", "Trailing 20d"], ["plan", "Plan"]]} />
-        <${Seg} label="Window" value=${preset} onChange=${setPreset} options=${[["auto", app.start != null ? "Since change" : "Last 5d"], ...(app.start != null ? [["5", "5d"]] : []), ["10", "10d"], ["20", "20d"]]} />
+        <${PeriodControls} mode=${mode} setMode=${setMode} win=${win} setWin=${setWin} base=${base} setBase=${setBase} />
       </div>
     </div>
 
     <div class="kpis">
       <div class="kpi"><span class="eyebrow">Window avg</span><span class="v">${fmt0(dev.cur)}</span><span class="s mono">${fmtDate(DATES[dev.ws])} – ${fmtDate(DATES[dev.we])} · ${inv.W} days</span></div>
-      <div class="kpi"><span class="eyebrow">${mode === "plan" ? "Plan" : "Baseline period"}</span><span class="v">${fmt0(dev.base)}</span><span class="s mono">${mode === "plan" ? "Monthly plan, same days" : `${fmtDate(DATES[dev.bs])} – ${fmtDate(DATES[dev.be])} · 20 days`}</span></div>
+      <div class="kpi"><span class="eyebrow">${mode === "plan" ? "Plan" : "Baseline period"}</span><span class="v">${fmt0(dev.base)}</span><span class="s mono">${mode === "plan" ? "Monthly plan, same days" : `${fmtDate(DATES[dev.bs])} – ${fmtDate(DATES[dev.be])} · ${dev.L} days`}</span></div>
       <div class="kpi"><span class="eyebrow">Change</span><span class=${`v ${dev.sev === "normal" ? "" : dev.d >= 0 ? "up" : "down"}`}>${signed0(dev.cur - dev.base)}</span><span class="s">${pct(dev.d)} · ${fmt1(dev.z)}σ vs baseline period</span></div>
       <div class="kpi"><span class="eyebrow">Explained by CPU breakdown</span><span class="v">${explained == null ? "—" : `${Math.round(explained * 100)}%`}</span><span class="s">${explained == null ? "No material change to explain" : "MVSPM_WORKLOAD2_HV vs tracking table"}</span></div>
     </div>
@@ -840,10 +865,10 @@ function Investigate({ code, mode, setMode, back }) {
 
     <div class="panel">
       <div class="panel-head">
-        <div><h2>Daily MIPS</h2><p>CAP_GRP_MIPS_D · last 90 business days</p></div>
+        <div><h2>Daily MIPS</h2><p>CAP_GRP_MIPS_D · baseline period and window shaded</p></div>
         <div class="legend">
           <span><i class="sw" style=${{ borderColor: "var(--series)" }}></i>Actual</span>
-          <span><i class="box" style=${{ background: "var(--series-weak)" }}></i>Trailing 20d ±2σ</span>
+          <span><i class="box" style=${{ background: "var(--series-weak)" }}></i>Trailing ${PERIOD_LABEL[base]} ±2σ</span>
           <span><i class="sw" style=${{ borderColor: "var(--fg-2)", borderTopStyle: "dashed" }}></i>Plan</span>
         </div>
       </div>
@@ -980,11 +1005,23 @@ function Notes() {
           <div><b>4 · Items</b><span>The transactions, packages and jobs that moved, with new items flagged.</span></div>
         </div>
       </div></div>
+      <div class="panel"><div class="panel-head"><h2>Root-cause method</h2></div><div class="panel-body">
+        <ol>
+          <li><strong>Confirm it's real.</strong> Rule out data and accounting causes first: missing SMF intervals, a hardware upgrade or MIPS-rating change, an app code remapped, work moved between LPARs, holidays.</li>
+          <li><strong>Find when.</strong> Locate the day the level shifted (change-point detection on the daily series). That date anchors every later comparison.</li>
+          <li><strong>Find where.</strong> Split the change across service classes and address spaces. These add up, so the split must reconcile to the tracking table.</li>
+          <li><strong>Find when in the day.</strong> An even lift suggests cost per unit; a new hump suggests new work; a shifted peak suggests a schedule change.</li>
+          <li><strong>Find the mechanism.</strong> For each workload table, split CPU change into volume and cost per unit, then rank the items that moved and flag ones that are new or gone.</li>
+          <li><strong>Check the usual system causes.</strong> zIIP-eligible work spilling onto general CPs, LPAR contention raising CPU per transaction, a matching drop in another app (work moved).</li>
+          <li><strong>Match to changes.</strong> Line up the change date with deploys, rebinds, maintenance, batch schedule changes and DR/IST events.</li>
+          <li><strong>Rank and close.</strong> Rank hypotheses by impact and agreement across tables, list what was ruled out, confirm with the app team, and record the cause so the forecast can exclude or keep the change.</li>
+        </ol>
+      </div></div>
       <div class="panel"><div class="panel-head"><h2>Should it run every calculation?</h2></div><div class="panel-body">
         <p>Not on every table for every app every time. The table list will grow, so cost has to grow with the number of flagged apps, not apps × tables. The plan is hybrid:</p>
         <ol>
           <li><strong>Nightly, all apps, one table.</strong> Score every app code on CAP_GRP_MIPS_D for both baselines. One aggregate query; it feeds triage.</li>
-          <li><strong>Nightly, flagged apps, all tables.</strong> For each flagged or drifting app, run every registered table's standard comparison (since change, or last 5 days, vs the 20 business days before). Store the results; the investigation page opens instantly.</li>
+          <li><strong>Nightly, flagged apps, all tables.</strong> For each flagged or drifting app, run every registered table's standard comparison (the last week vs the month before, the defaults on screen). Store the results; the investigation page opens instantly.</li>
           <li><strong>On demand, any app, any window.</strong> Changing the window starts a job. Tables run in parallel and each result appears as it finishes; the page never waits for the slowest table. Results are cached by app, table and window.</li>
         </ol>
         <p>All comparisons push the aggregation into Db2: <span class="mono">GROUP BY app, item, period</span> with the window and baseline as parameters. Only summary rows cross the network.</p>
@@ -1013,9 +1050,10 @@ function App() {
   const [page, setPage] = useState(APPS.some((a) => a.code === initial.code) || initial.page !== "inv" ? initial.page : "triage");
   const [code, setCode] = useState(initial.code && APPS.some((a) => a.code === initial.code) ? initial.code : "CLMS");
   const [mode, setMode] = useState("trailing");
-  const [win, setWin] = useState("5");
+  const [win, setWin] = useState("1w");
+  const [base, setBase] = useState("1m");
   const go = (p, c) => { setPage(p); if (c) setCode(c); try { history.replaceState(null, "", "#" + (p === "inv" ? `app-${c || code}` : p)); } catch (e) {} window.scrollTo(0, 0); };
-  const flaggedCount = useMemo(() => APPS.filter((a) => deviation(a, Number(win), mode).sev !== "normal").length, [mode, win]);
+  const flaggedCount = useMemo(() => APPS.filter((a) => deviation(a, win, base, mode).sev !== "normal").length, [mode, win, base]);
   return html`<div class="shell">
     <nav class="rail" aria-label="Main">
       <div class="brand">MIPS Deviation Workbench<small>SMF ROOT-CAUSE · PRIME TIME</small></div>
@@ -1033,8 +1071,8 @@ function App() {
     </nav>
     <main>
       <div class="sample-banner"><b>Sample data.</b> Synthetic numbers for layout review. App codes, items and the four tables marked "Example" are invented.</div>
-      ${page === "triage" && html`<${Triage} mode=${mode} setMode=${setMode} win=${win} setWin=${setWin} open=${(c) => go("inv", c)} />`}
-      ${page === "inv" && html`<${Investigate} key=${code} code=${code} mode=${mode} setMode=${setMode} back=${() => go("triage")} />`}
+      ${page === "triage" && html`<${Triage} mode=${mode} setMode=${setMode} win=${win} setWin=${setWin} base=${base} setBase=${setBase} open=${(c) => go("inv", c)} />`}
+      ${page === "inv" && html`<${Investigate} key=${code} code=${code} mode=${mode} setMode=${setMode} win=${win} setWin=${setWin} base=${base} setBase=${setBase} back=${() => go("triage")} />`}
       ${page === "sources" && html`<${Sources} />`}
       ${page === "notes" && html`<${Notes} />`}
     </main>
