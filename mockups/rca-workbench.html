@@ -35,28 +35,8 @@
   --f-body: Roboto, Arial, Helvetica, sans-serif;
   --f-mono: "Roboto Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --brand: #061a31; --on-brand: #eef3f9; --on-brand-2: #b3c1d4; --brand-hover: #0c2541; --brand-active: #0f2d52;
-    --bg: #00101f; --surface: #061a31; --surface-2: #0c2541; --line: #1b3555;
-    --fg: #eef3f9; --fg-2: #b3c1d4; --fg-3: #8495ac;
-    --accent: #5aaef2; --accent-weak: #0f2d52;
-    --series: #3d9be9; --series-weak: #12345e;
-    --up: #e66767; --down: #3987e5;
-    --win: rgba(230, 103, 103, 0.10); --basewin: rgba(90, 166, 240, 0.08);
-    --shadow: none; color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --brand: #061a31; --on-brand: #eef3f9; --on-brand-2: #b3c1d4; --brand-hover: #0c2541; --brand-active: #0f2d52;
-  --bg: #00101f; --surface: #061a31; --surface-2: #0c2541; --line: #1b3555;
-  --fg: #eef3f9; --fg-2: #b3c1d4; --fg-3: #8495ac;
-  --accent: #5aaef2; --accent-weak: #0f2d52;
-  --series: #3d9be9; --series-weak: #12345e;
-  --up: #e66767; --down: #3987e5;
-  --win: rgba(230, 103, 103, 0.10); --basewin: rgba(90, 166, 240, 0.08);
-  --shadow: none; color-scheme: dark;
-}
+/* Single light theme by design: white surfaces with blue accents in every viewer theme. */
+:root { color-scheme: light; }
 * { box-sizing: border-box; }
 body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 14px; line-height: 1.45; }
 button { font: inherit; color: inherit; }
